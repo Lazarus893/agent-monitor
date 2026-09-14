@@ -258,6 +258,18 @@ accent
      across three semantic tiers, so shape does: the notch measures 18.24:1 on
      ink, 13.39 on charcoal, 12.68 on warn, 6.81 on danger and 3.75 on the bare
      track — constant and tier-independent. Semantic red/yellow are untouched. */
+  /* REVISION 7（用户 2026-09-14 晚追加）：进度条填充改用各 agent 的身份色。
+     这条明确覆盖了 §7 原来「身份色只用于徽记 / 圆点这类小面积」的自我约束——
+     用户要的是「一眼看出这条是谁的」，而身份色是分类色，不计入 accent。
+     引用身份色而不复制 hex：ZCode 的蓝是在 OKLCH 里校准过的，抄一份就会漂。
+     Claude 橙、ZCode 蓝叠在 --ash 轨道上只有约 1.7:1，但边界不靠色差——
+     它由填充末端那道 2px --canvas 缺口承担（R3-01/R4-02 的机制，对各档填充
+     实测 6.42–13.39:1）。这正是当初把边界从颜色换成形状的回报：
+     现在换填充色不需要再动任何对比度补偿。 */
+  --quota-fill-codex:  var(--id-codex);
+  --quota-fill-claude: var(--id-claude);
+  --quota-fill-zcode:  var(--id-zcode);
+
   --quota-notch:       var(--canvas);
   --quota-notch-w:     2px;
   --quota-warn-at:     80;
@@ -366,7 +378,7 @@ accent
   --manual-hold: 120s;
 
   /* 横向压缩补偿（v2 第 5 条）。副屏在 960×540 模式下被面板缩放器横向压了 15.6%，
-     用户用 design/aspect-test.html 的圆校准出系数 1.19。画布逻辑宽收窄到
+     用户用 design/tools/aspect-test.html 的圆校准出系数 1.19。画布逻辑宽收窄到
      round(480 / 1.19) = 403px，再由 stage 的非等比 transform 拉回 960 物理宽。
      960×640 原生模式下不需要补偿，置 1.0。
 
@@ -635,11 +647,9 @@ html[data-pure="1"] .pure-hint{position:fixed;left:50%;bottom:24px;transform:tra
 
 /* 轨道 --ash 3.64:1；填充 --charcoal 3.57:1；末端一道 2px --canvas 缺口 */
 .bar{background:var(--quota-track);border-radius:var(--r-full);overflow:hidden;flex:none}
-.bar>i{display:block;height:100%;background:var(--quota-fill);border-radius:var(--r-full);
+.bar>i{display:block;height:100%;background:var(--fill, var(--quota-fill));border-radius:var(--r-full);
   box-shadow:var(--quota-notch-w) 0 0 var(--quota-notch);
   transition:width var(--dur-bar) var(--ease-standard)}
-.bar[data-level="warn"]>i{background:var(--quota-warn)}
-.bar[data-level="danger"]>i{background:var(--quota-danger)}
 
 /* ---- 五态消息块 ---- */
 /* R5-09 · msg 态原来按各自内容垂直居中，行数不同就不共基线（实测最大差 19px）。
@@ -703,6 +713,8 @@ html[data-pure="1"] .pure-hint{position:fixed;left:50%;bottom:24px;transform:tra
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.2}
 .page-b .b-verdict[data-tone="error"]{color:var(--danger)}
 .page-b .b-verdict[data-tone="attn"]{color:var(--ink);font-weight:var(--w-read)}
+.page-b .b-alert{display:inline-flex;align-items:center;flex:none;color:var(--quota-warn)}
+.page-b [data-level="danger"] .b-alert{color:var(--quota-danger)}
 .page-b .b-pc{font-size:var(--fs-num-b);font-weight:var(--w-emph);color:var(--ink);flex:none}
 .page-b [data-level="warn"]   .b-pc{color:var(--quota-warn)}
 .page-b [data-level="danger"] .b-pc{color:var(--quota-danger)}
@@ -710,12 +722,13 @@ html[data-pure="1"] .pure-hint{position:fixed;left:50%;bottom:24px;transform:tra
 .page-b .b-cd{font-size:var(--fs-min);color:var(--mute);flex:none;width:48px;text-align:right}
 .page-b .band{position:relative;height:12px;flex:none;
   background:var(--quota-track);border-radius:var(--r-xs);overflow:hidden}
-.page-b .band .used{position:absolute;left:0;top:0;bottom:0;background:var(--quota-fill);
+/* 填充用该 agent 的身份色（REVISION 7）。阈值不再把整条改成黄 / 红——那会和身份色
+   打架，也会让「这条是谁的」在最需要看清的时候消失。阈值改由百分比数字变色 +
+   数字旁的警示图标承担，颜色之外仍有非颜色信号。 */
+.page-b .band .used{position:absolute;left:0;top:0;bottom:0;background:var(--fill);
   border-radius:var(--r-xs) 0 0 var(--r-xs);
   box-shadow:var(--quota-notch-w) 0 0 var(--quota-notch);
   transition:width var(--dur-bar) var(--ease-standard)}
-.page-b [data-level="warn"]   .band .used{background:var(--quota-warn)}
-.page-b [data-level="danger"] .band .used{background:var(--quota-danger)}
 /* 「现在」游标：--canvas，对轨道 3.75、对各档填充 6.81–13.39，不随填充色漂移 */
 .page-b .band .caret{position:absolute;top:0;bottom:0;width:2px;background:var(--quota-notch);margin-left:-1px}
 /* R5-02 · 重置刻度原来是带内一道 --mute 竖线，对 ash 轨道只有 1.95:1，不可辨；
@@ -2314,9 +2327,12 @@ const USAGE  = JSON.parse(document.getElementById("fx-usage").textContent);
 const NEWS   = JSON.parse(document.getElementById("fx-news").textContent);
 
 const AGENTS = {
-  codex : {id:"codex",  name:"Codex",       tag:"Codex",  color:"var(--id-codex)" },
-  claude: {id:"claude", name:"Claude Code", tag:"Claude", color:"var(--id-claude)"},
-  zcode : {id:"zcode",  name:"ZCode",       tag:"ZCode",  color:"var(--id-zcode)" },
+  codex : {id:"codex",  name:"Codex",       tag:"Codex",  color:"var(--id-codex)",
+           fill:"var(--quota-fill-codex)" },
+  claude: {id:"claude", name:"Claude Code", tag:"Claude", color:"var(--id-claude)",
+           fill:"var(--quota-fill-claude)"},
+  zcode : {id:"zcode",  name:"ZCode",       tag:"ZCode",  color:"var(--id-zcode)",
+           fill:"var(--quota-fill-zcode)" },
 };
 
 const p2 = n => String(n).padStart(2,"0");
@@ -2543,7 +2559,7 @@ function renderPageA(){
           class="cd mono" data-foot="${esc(w5.resetsAt)}" data-level="${lv}" data-status="${t.status}"></span><span
           class="word" data-word="${lv}|${t.status}"></span></div>`;
     }
-    return `<section class="tile" data-status="${t.status}" data-level="${lv}" style="--idc:${a.color}" ` +
+    return `<section class="tile" data-status="${t.status}" data-level="${lv}" style="--idc:${a.color};--fill:${a.fill}" ` +
            `aria-label="${esc(a.name)} 额度">${head}${body}</section>`;
   }).join("");
 }
@@ -2582,6 +2598,7 @@ function renderPageB(){
       const start = new Date(w5.resetsAt).getTime() - WIN5H;
       inner = `<div class="b-head">${nameCell}
         <span class="b-verdict" data-model="${esc(topModel(t.agent))}" data-status="${t.status}"></span>
+        ${lv === "ok" ? "" : `<span class="b-alert" aria-label="${lv === "danger" ? "余量吃紧" : "余量偏紧"}">${svg("alert",14)}</span>`}
         <span class="b-pc mono">${w5.usedPercent}%</span>
         ${w7 ? `<span class="b-sec mono">${esc(w7.label)} ${w7.usedPercent}%</span>` : ""}
         <span class="b-cd mono" data-cd="${esc(w5.resetsAt)}"></span></div>
@@ -2591,7 +2608,7 @@ function renderPageB(){
             <span class="caret" data-caret="${start}"></span></div>
           <span class="resettick"></span></div>`;
     }
-    return `<section class="tile" data-status="${t.status}" data-level="${lv}" style="--idc:${a.color}" ` +
+    return `<section class="tile" data-status="${t.status}" data-level="${lv}" style="--idc:${a.color};--fill:${a.fill}" ` +
            `aria-label="${esc(a.name)} 额度">${inner}</section>`;
   }).join("");
 }
@@ -2660,9 +2677,26 @@ function heatLevel(intensity, max){
   const t = max > 0 ? intensity / max : 0;
   return Math.min(4, 1 + Math.floor(t * 4 - 1e-9));
 }
+/* edge · 一天的用量远超其余。这是分档机制真正会失效的地方：一个离群值把 max 抬高，
+   其余所有天都被压进第 1 档，屏上只剩一个亮格、其余一片同色。基于真实的 56 天改写，
+   只动最猛的那一天（×6），其余原封不动——和 edge 事件流一样是标注过的合成数据。 */
+function usageDays(st){
+  const days = USAGE.days || [];
+  if (st !== "edge" || !days.length) return days;
+  let top = 0, idx = 0;
+  days.forEach((d, i) => { if ((d.intensity || 0) > top){ top = d.intensity || 0; idx = i; } });
+  return days.map((d, i) => i !== idx ? d : {
+    ...d, intensity: Math.min(1, (d.intensity || 0) * 6),
+    byAgent: {...d.byAgent, claude: {tokens: (d.byAgent?.claude?.tokens || 0) * 6}},
+  });
+}
+
 function renderPageD(){
   const st = scene.dataState;
-  if (st !== "ok"){
+  const days = usageDays(st);
+  /* edge 也要出图 —— 它原来落进了 st !== "ok" 这一支，于是七态里 D 页只有四种渲染，
+     edge 谎报成「还没有用量数据」。空态是没有数据，不是数据极端。 */
+  if (st === "loading" || st === "empty" || st === "error" || !days.length){
     el.pdHeat.innerHTML = st === "loading"
       ? `<div class="feed-skel"><i style="height:20px"></i><i style="height:104px"></i>
          <span class="loading-label" role="status">读取中</span></div>`
@@ -2672,7 +2706,6 @@ function renderPageD(){
          <p>${st === "error" ? "codexbar cost 调用超时，10 分钟后重试" : "跑满一天后这里会出现第一格"}</p></div>`;
     return;
   }
-  const days = USAGE.days || [];
   const maxI = days.reduce((m, d) => Math.max(m, d.intensity || 0), 0);
   /* 列数由画布宽度决定：每列 cell+2px，减去星期标签列与间隙 */
   const cell = 13;

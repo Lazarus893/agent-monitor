@@ -143,11 +143,9 @@ body{margin:0;background:var(--canvas);overflow:hidden;
 
 /* 轨道 --ash 3.64:1；填充 --charcoal 3.57:1；末端一道 2px --canvas 缺口 */
 .bar{background:var(--quota-track);border-radius:var(--r-full);overflow:hidden;flex:none}
-.bar>i{display:block;height:100%;background:var(--quota-fill);border-radius:var(--r-full);
+.bar>i{display:block;height:100%;background:var(--fill, var(--quota-fill));border-radius:var(--r-full);
   box-shadow:var(--quota-notch-w) 0 0 var(--quota-notch);
   transition:width var(--dur-bar) var(--ease-standard)}
-.bar[data-level="warn"]>i{background:var(--quota-warn)}
-.bar[data-level="danger"]>i{background:var(--quota-danger)}
 
 /* ---- 五态消息块 ---- */
 /* R5-09 · msg 态原来按各自内容垂直居中，行数不同就不共基线（实测最大差 19px）。
@@ -211,6 +209,8 @@ body{margin:0;background:var(--canvas);overflow:hidden;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.2}
 .page-b .b-verdict[data-tone="error"]{color:var(--danger)}
 .page-b .b-verdict[data-tone="attn"]{color:var(--ink);font-weight:var(--w-read)}
+.page-b .b-alert{display:inline-flex;align-items:center;flex:none;color:var(--quota-warn)}
+.page-b [data-level="danger"] .b-alert{color:var(--quota-danger)}
 .page-b .b-pc{font-size:var(--fs-num-b);font-weight:var(--w-emph);color:var(--ink);flex:none}
 .page-b [data-level="warn"]   .b-pc{color:var(--quota-warn)}
 .page-b [data-level="danger"] .b-pc{color:var(--quota-danger)}
@@ -218,12 +218,13 @@ body{margin:0;background:var(--canvas);overflow:hidden;
 .page-b .b-cd{font-size:var(--fs-min);color:var(--mute);flex:none;width:48px;text-align:right}
 .page-b .band{position:relative;height:12px;flex:none;
   background:var(--quota-track);border-radius:var(--r-xs);overflow:hidden}
-.page-b .band .used{position:absolute;left:0;top:0;bottom:0;background:var(--quota-fill);
+/* 填充用该 agent 的身份色（REVISION 7）。阈值不再把整条改成黄 / 红——那会和身份色
+   打架，也会让「这条是谁的」在最需要看清的时候消失。阈值改由百分比数字变色 +
+   数字旁的警示图标承担，颜色之外仍有非颜色信号。 */
+.page-b .band .used{position:absolute;left:0;top:0;bottom:0;background:var(--fill);
   border-radius:var(--r-xs) 0 0 var(--r-xs);
   box-shadow:var(--quota-notch-w) 0 0 var(--quota-notch);
   transition:width var(--dur-bar) var(--ease-standard)}
-.page-b [data-level="warn"]   .band .used{background:var(--quota-warn)}
-.page-b [data-level="danger"] .band .used{background:var(--quota-danger)}
 /* 「现在」游标：--canvas，对轨道 3.75、对各档填充 6.81–13.39，不随填充色漂移 */
 .page-b .band .caret{position:absolute;top:0;bottom:0;width:2px;background:var(--quota-notch);margin-left:-1px}
 /* R5-02 · 重置刻度原来是带内一道 --mute 竖线，对 ash 轨道只有 1.95:1，不可辨；
@@ -327,7 +328,6 @@ body{margin:0;background:var(--canvas);overflow:hidden;
 .page-d .d-tip .dim{color:var(--mute);overflow:hidden;text-overflow:ellipsis}
 .page-d .d-scale{display:flex;align-items:center;gap:var(--sp-xs);flex:none;margin-inline-start:var(--sp-sm)}
 .page-d .d-scale i{width:8px;height:8px;border-radius:2px;display:block}
-
 
 /* ==========================================================================
    E 页 · 今日 AI 大事（AIHOT）—— 这一页是阅读不是扫视，五条等权

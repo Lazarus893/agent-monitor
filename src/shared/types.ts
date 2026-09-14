@@ -174,7 +174,7 @@ export type MonitorState = {
   /**
    * 扩展 6（M3）· 横向压缩补偿。
    * 副屏在 960×540 模式下被面板缩放器横向压 15.6%（EDID 原生 960×640），
-   * 用户用 design/aspect-test.html 的正圆实测系数为 1.19。
+   * 用户用 design/tools/aspect-test.html 的正圆实测系数为 1.19。
    * 画布逻辑宽度 = round(canvas.width / panelX)，stage 横向再按比例拉回去，
    * 于是屏上 1px 宽 = 1px 高。960×640 原生模式下为 1.0。
    */
@@ -203,6 +203,14 @@ export type MonitorCommand =
   | { type: 'panelX'; value: number }
   /** ⌃⌥C：校准叠层开关（200px 正圆 + 十字线，调到正圆即为补偿到位） */
   | { type: 'calibrate' }
+  /**
+   * M4 · 托盘「静音提示音」。
+   * 走 command 而不是塞进 MonitorState：它是一个偏好，不是被观察到的数据，
+   * 而 `setScene` / `liveState` 每次都重建整份 state —— 偏好放进去就要在
+   * 每一处构造点重新穿一遍，漏一处就是「切了场景之后静音失效」。
+   * 主进程在 did-finish-load 时补推一次当前值，重载后不会丢。
+   */
+  | { type: 'mute'; value: boolean }
 
 export type DevApi = {
   /** 场景名 = 喂 fixtures；'live' = 切回真实采集 */
@@ -221,5 +229,10 @@ export type MonitorApi = {
   setPage(page: Page): void
   /** 截图脚本用：渲染层画完一帧后回报，带回指令里的 token */
   rendered(token: number): void
-  dev: DevApi
+  /**
+   * 调试栏用的那几个模拟入口。**打包产物里不存在**（preload 里按构建期常量挂上），
+   * 所以是可选的 —— 调用点必须写 `?.`，这正是它的真实形态。
+   * 主进程侧也按 `app.isPackaged` 不注册对应频道，两道都挡着。
+   */
+  dev?: DevApi
 }

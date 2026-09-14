@@ -43,6 +43,32 @@ const SWEEP_MS = 3_000
 const MAX_CHUNK = 4 * 1024 * 1024
 /** 半行缓冲的上限。正常 rollout 一行几 KB，2 MB 已经远超任何真实情况。 */
 const MAX_TAIL = 2 * 1024 * 1024
+/**
+ * 启动之后，每轮只到最近这么多天的日期目录里去**找新文件**（M3 复核 §5）。
+ *
+ * 为什么可以只看两天：`~/.codex/sessions` 的结构是 `年/月/日/`，新的 rollout
+ * 只会出现在今天（跨零点时是昨天）的目录里。而**老文件不是靠这一步认识的**——
+ * 启动那一轮走的是全量，所有老文件在那时就进了 `files` 表并记下 offset，
+ * 之后 `codex resume` 把某个三个月前的会话重新写起来，它照样在每轮的读取名单里。
+ *
+ * 省掉的是什么：本机 1624 份 rollout / 391 MB，全量一轮是 1624 次 stat（热态 ~21 ms），
+ * 每 3 s 一次就是持续占掉 0.7% 的一个核，而且随时间单调变差。
+ */
+const RECENT_DAYS = 2
+/**
+ * 启动时被跳过的那一批老文件，多久才重新 stat 一遍。
+ *
+ * 光按日期目录裁剪是**不够的**：启动那一轮把全部 1624 个文件都记进了 `files` 表
+ * （resume 要靠它们的 offset），之后每轮照样会对着这 1624 个 stat 一遍 ——
+ * 省掉的只是 readdir 那 5 ms，17 ms 的 stat 风暴还在。
+ *
+ * 所以每 3 s 那一轮只看**这一程真的读过内容的文件**（非 skipped，本机通常个位数）
+ * 加上今天 / 昨天目录里的；那一大批 skipped 的老文件降到每 60 s 扫一次。
+ * 代价：`codex resume` 一个一天以上没动过的老会话，最坏要 60 s 才上屏
+ * （本机 1624 份里 12 份是这种形态）。fs.watch 报上来文件名时会走 `dirty` 那条快路，
+ * 60 s 只是没有 FSEvents 时的保底。
+ */
+const DEEP_SWEEP_MS = 60_000
 
 export function attentionTypes(env = process.env.MONITOR_CODEX_ATTENTION_TYPES): Set<string> {
   const fromEnv = (env ?? '').split(',').map(s => s.trim()).filter(Boolean)
@@ -205,6 +231,10 @@ export class CodexEvents implements EventCollector {
   private busy = false
   /** 扫描期间又来了变化：不丢，扫完立刻再来一轮（FSEvents 在长扫描中途照样会发） */
   private again = false
+  /** 上一次把 skipped 的老文件也扫进来是什么时候（见 DEEP_SWEEP_MS） */
+  private lastDeep = 0
+  /** fs.watch 点过名的文件 —— 下一轮无条件看一眼，不等 60 s 的深扫 */
+  private dirty = new Set<string>()
 
   constructor(
     private sink: EventSink,
@@ -231,7 +261,15 @@ export class CodexEvents implements EventCollector {
     await this.sweep()
     this.booted = true
     try {
-      this.watcher = watch(this.dir, { recursive: true }, () => { void this.sweep() })
+      this.watcher = watch(this.dir, { recursive: true }, (_ev, name) => {
+        /* FSEvents 给的是相对 dir 的路径。记下来，下一轮 targets() 会把它加进去 ——
+           这条是老会话被 resume 时的快路径，没有它就得等 60 s 的深扫。
+           名字拿不到（某些平台会给 null）时只触发一轮普通扫描，行为退回原样。 */
+        if (typeof name === 'string' && name.endsWith('.jsonl') && name.includes('rollout-')) {
+          this.dirty.add(join(this.dir, name))
+        }
+        void this.sweep()
+      })
       this.watcher.on('error', err => this.sink.log(`[events:codex] watch 出错：${String(err)}`))
     } catch (err) {
       // 目录不存在 / 平台不支持 recursive —— 退回纯轮询，不崩
@@ -250,8 +288,11 @@ export class CodexEvents implements EventCollector {
   /** 手动跑一轮增量（selftest 与单测用：不必等 FSEvents 或 3 s 轮询）。
    *  先等当前这一轮走完，再确实地跑一轮 —— 否则 FSEvents 正好在扫的时候，
    *  这次调用会被重入保护挡掉，调用方以为扫过了。 */
-  async tick(): Promise<void> {
+  async tick(deep = true): Promise<void> {
     while (this.busy) await new Promise(r => setTimeout(r, 10))
+    // 手动那一轮默认深扫：调用方要的是「现在把该看的都看一遍」，不是「省一点 stat」。
+    // `deep: false` 只有单测用，为的是把「浅扫到底看不看 skipped 的老文件」钉住。
+    if (deep) this.lastDeep = 0
     await this.sweep()
   }
 
@@ -263,7 +304,7 @@ export class CodexEvents implements EventCollector {
       do {
         this.again = false
         const cut = this.now() - BACKFILL_MS
-        for (const file of await listRollouts(this.dir)) {
+        for (const file of await this.targets()) {
           let mtime = 0
           try {
             mtime = (await stat(file)).mtimeMs
@@ -289,6 +330,33 @@ export class CodexEvents implements EventCollector {
     } finally {
       this.busy = false
     }
+  }
+
+  /**
+   * 这一轮要看哪些文件。
+   * 启动那一轮：全量 —— 老文件都得进表记 offset，否则 resume 会被当成一串新事件。
+   * 之后每轮：已知的全部（resume 会往里追写）+ 最近两天目录里新冒出来的。
+   */
+  private async targets(): Promise<string[]> {
+    // 启动那一轮：全量。老文件必须都进表记 offset，否则 resume 会被当成一串新事件。
+    if (!this.booted) {
+      this.lastDeep = this.now()
+      return listRollouts(this.dir)
+    }
+    const deep = this.now() - this.lastDeep >= DEEP_SWEEP_MS
+    if (deep) this.lastDeep = this.now()
+
+    const out = new Set<string>()
+    // 这一程读过内容的文件：每轮都看
+    for (const [file, st] of this.files) if (deep || !st.skipped) out.add(file)
+    // 新文件只会出现在今天 / 昨天的目录里（codex 按本地日期建目录）
+    for (const f of await listRollouts(this.dir, recentDayDirs(this.dir, this.now(), RECENT_DAYS))) {
+      out.add(f)
+    }
+    // fs.watch 点过名的：不等 60 s，这一轮就看
+    for (const f of this.dirty) out.add(f)
+    this.dirty.clear()
+    return [...out]
   }
 
   /** 老文件：只把 offset 推到文件尾，一行都不解析。 */
@@ -367,8 +435,26 @@ export function basenameSession(file: string): string {
   return m?.[1] ?? file
 }
 
-/** 递归列出 sessions 目录下的 rollout-*.jsonl。目录不存在返回空表。 */
-export async function listRollouts(dir: string): Promise<string[]> {
+/**
+ * `<sessions>/YYYY/MM/DD` 的最近 `days` 个日期目录（含今天），按**本地时间**算 ——
+ * codex 就是按本地日期建目录的（本机 2026/09/14 = 今天）。
+ * 目录存不存在这里不管，listRollouts 读不到就跳过。
+ */
+export function recentDayDirs(base: string, nowMs: number, days: number): string[] {
+  const out: string[] = []
+  for (let i = 0; i < days; i++) {
+    const d = new Date(nowMs - i * 86_400_000)
+    const p = (n: number): string => String(n).padStart(2, '0')
+    out.push(join(base, String(d.getFullYear()), p(d.getMonth() + 1), p(d.getDate())))
+  }
+  return out
+}
+
+/**
+ * 递归列出 rollout-*.jsonl。目录不存在返回空表。
+ * `roots` 给了就只走那几个子目录（增量发现用），不给就从 `dir` 整棵走（启动那一轮）。
+ */
+export async function listRollouts(dir: string, roots?: readonly string[]): Promise<string[]> {
   const out: string[] = []
   const walk = async (d: string, depth: number): Promise<void> => {
     if (depth > 5) return
@@ -384,6 +470,6 @@ export async function listRollouts(dir: string): Promise<string[]> {
       else if (e.isFile() && e.name.startsWith('rollout-') && e.name.endsWith('.jsonl')) out.push(p)
     }
   }
-  await walk(dir, 0)
+  for (const root of roots ?? [dir]) await walk(root, 0)
   return out
 }

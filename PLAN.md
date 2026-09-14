@@ -182,7 +182,7 @@ Monitor/
 | **M0 设计** ✅ 2026-09-14 | `design/tokens.css`、`design/wireframes.html`、`design/variations.html`（轮播版：A/B/C + attention 页，7 状态，真实数据）、留档 `variations-960x540.html` 与 `variations-35-single.html`、五份评审报告 `design/review/01–05`、作者笔记 `00` | 五轮评审共 3 P0 / 20+ P1 全部修复或有理由跳过；发布前验证 28/28、轮播 12/12 通过；待你在 artifact 里过目 |
 | **M1 骨架** ✅ 2026-09-14 | electron-vite 5 / Electron 44；`src/main`（displays.pickTarget、RelocateQueue、state、shortcuts）、`src/renderer`（四页移植、画布参数化）、63 条单测、selftest 14 项、28 张对账截图 `design/shots/m1/` | 代码复核 `docs/review/m1-code-review.md`：1 P0 + 4 P1 修复并复验通过；实机插拔由用户验证（待回报） |
 | **M2 额度** ✅ 2026-09-14 | `src/main/collectors/`（scheduler、quota/codex·claude·zcode、keychain）、statusline tee + 安装脚本（已安装，备份 `settings.json.bak-20260914-193421`）、146 单测 | 三家真实数字与 codexbar / 智谱接口当场一致；复核 `docs/review/m2-code-review.md` 4 P1 修复并复验 |
-| **M3 事件** | 三个 event collector、事件流、未读 / ack、提示音 | `codex exec "echo hi"` 2 秒内出现；`claude -p` 触发 Stop；ZCode 跑一个任务状态翻转 |
+| **M3 事件** ✅ 2026-09-14 | `collectors/events/`（Codex 监听、Claude hooks + 本地接收、ZCode 轮询、持久化）、v2 六页移植、usage / topModel / news collector、panelX；291 单测、selftest 42 | 真实 `codex exec` 事件 6 s 内上屏（受控 111 ms）；hooks 已安装（备份 `settings.json.bak-20260914-202148`）；复核 `docs/review/m3-code-review.md` 5 P1 修复并复验。待用户实机：ZCode 任务翻转、`claude -p` 触发、拔插副屏 |
 | **M4 打磨** | 「等待你」状态、托盘、登录自启、electron-builder 打成 `~/Applications/Agent Monitor.app`、polish-pass | 四项审查过；连续运行 24h 无泄漏 |
 
 每个 collector 的解析器都配 vitest fixture（用本机真实样本脱敏）。

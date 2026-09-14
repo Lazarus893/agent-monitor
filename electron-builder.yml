@@ -1,0 +1,56 @@
+# electron-builder · 只打 macOS arm64 的 `dir` 产物（简报 §3）。
+#
+# 不做 dmg、不做自动更新：这个 app 只装在本机一台 Mac 上，`ditto` 到
+# ~/Applications 就够了，dmg 只是多一层要点两下的壳。
+#
+# 签名是 **ad-hoc**：`identity: null` 让 electron-builder 完全不签，
+# 之后由 `pnpm package` 里的 `codesign --force --deep -s -` 自己签一遍。
+# 这样做的代价写在 README 的「首次启动」一节：Gatekeeper 会拦一次。
+
+appId: com.tonyye.agent-monitor
+productName: Agent Monitor
+copyright: © 2026 tonyye
+
+directories:
+  output: dist
+  buildResources: build
+
+# 只有构建产物进 asar。源码、design/、tests/ 一律不进包。
+files:
+  - out/**/*
+  - package.json
+
+# 安装脚本必须在 asar **外面**：它们要被 `node` 与 `bash` 当成真实文件打开，
+# asar 里的路径这两个都读不到。托盘的「Claude 采集」子菜单跑的就是它们。
+extraResources:
+  - from: scripts
+    to: scripts
+    filter:
+      - install-claude-hooks.mjs
+      - install-claude-statusline.mjs
+      - claude-hook.sh
+      - claude-statusline-tee.sh
+  # 托盘图同理：nativeImage 从磁盘路径读，@2x 要和 1x 挨着放才会被自动选中
+  - from: build/trayTemplate.png
+    to: trayTemplate.png
+  - from: build/trayTemplate@2x.png
+    to: trayTemplate@2x.png
+
+asar: true
+
+mac:
+  target:
+    - target: dir
+      arch:
+        - arm64
+  category: public.app-category.developer-tools
+  icon: build/icon.icns
+  # ad-hoc：这里不签，交给 pnpm package 的 codesign 步骤
+  identity: null
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  extendInfo:
+    # 面板常驻副屏，Dock 图标留着 —— 用户要能从 Dock 看出它在跑，
+    # 也要能在「强制退出」里找到它。托盘才是设置入口，Dock 只是存在感。
+    LSUIElement: false
+    NSHumanReadableCopyright: © 2026 tonyye

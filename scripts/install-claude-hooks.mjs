@@ -20,7 +20,7 @@
  *   · 缩进与结尾换行沿用原文件。
  */
 
-import { copyFileSync, readFileSync, writeFileSync } from 'node:fs'
+import { copyFileSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -48,6 +48,29 @@ const at = argv.indexOf('--settings')
 const settingsPath = at >= 0 && argv[at + 1]
   ? resolve(argv[at + 1])
   : join(homedir(), '.claude', 'settings.json')
+
+/**
+ * 原子写（M4 复核 P1-①）。
+ *
+ * `writeFileSync` 对已存在的文件是 `open(..., 'w')` —— **先截断、再写**。
+ * 中间被打断（`install.ts` 给的 20 s 超时会发 SIGTERM，正好能落在这个窗口里；磁盘满同理）
+ * 就会留下一个 0 字节或半截的 `~/.claude/settings.json`，用户的 Claude Code 整个起不来。
+ * 这是本项目唯一会碰用户全局配置的地方，比我们自己的配置更该用这个写法
+ * （src/main/config.ts 早就是这么写的）。
+ *
+ * tmp 放在**同一个目录**，`rename` 才是同一文件系统上的原子操作。
+ * 失败时把 tmp 清掉，不给用户留一个 `settings.json.tmp` 的谜。
+ */
+function writeAtomic(file, body) {
+  const tmp = `${file}.tmp-${process.pid}`
+  try {
+    writeFileSync(tmp, body, { mode: 0o600 })
+    renameSync(tmp, file)
+  } catch (err) {
+    try { unlinkSync(tmp) } catch { /* 本来就没写出来 */ }
+    throw err
+  }
+}
 
 function detectIndent(text) {
   const m = text.match(/\n([ \t]+)"/)
@@ -144,11 +167,14 @@ function main() {
     return
   }
 
+  /* 顺序要紧（复核 P1-①）：备份 → **先把备份路径打出来** → 再写。
+     原来这一行 console.log 在写入之后，被 SIGTERM 打断的那一次用户什么也看不到，
+     不知道有备份、更不知道备份在哪 —— 托盘只会说一句「安装失败，详见日志」。 */
   const backup = `${settingsPath}.bak-${stamp()}`
   copyFileSync(settingsPath, backup)
-  writeFileSync(settingsPath, body)
-
   console.log(`备份：${backup}`)
+  writeAtomic(settingsPath, body)
+
   console.log(uninstall
     ? `已移除 ${EVENTS.join(' / ')} 上本脚本装的 hook。`
     : `已装 ${EVENTS.join(' / ')} 四个 hook（timeout ${TIMEOUT}s）：\n  ${command}\n` +

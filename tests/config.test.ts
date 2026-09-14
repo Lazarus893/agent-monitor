@@ -7,8 +7,8 @@ import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  DEFAULT_CONFIG_FILE, PANEL_X_COMPRESSED, PANEL_X_NATIVE, PanelXConfig, configFile,
-  defaultPanelX, readConfig, writeConfig
+  DEFAULT_CONFIG_FILE, DEFAULT_PREFS, PANEL_X_COMPRESSED, PANEL_X_NATIVE, PanelXConfig,
+  configFile, defaultPanelX, readConfig, readPrefs, writeConfig, writePref
 } from '../src/main/config.js'
 import { canvasWidthFor, clampPanelX, scaleFor } from '../src/shared/scale.js'
 
@@ -145,5 +145,57 @@ describe('配置文件', () => {
 
   it('写不进去时返回 false，不抛', () => {
     expect(writeConfig({ panelX: 1.19 }, '/proc/nope/config.json')).toBe(false)
+  })
+})
+
+/* ==========================================================================
+   M4 · 托盘的三个开关与合并写。
+   M3 复核 §3.4 把「writeConfig 整份覆盖」记成前向陷阱；M4 加了三个字段之后
+   它立刻会变成真 bug（勾一下静音把校准出来的 panelX 冲掉），所以在这里钉死。
+   ========================================================================== */
+
+describe('托盘偏好', () => {
+  const tmp = (): string => join(mkdtempSync(join(tmpdir(), 'cfg-prefs-')), 'config.json')
+
+  it('默认值：不静音、不置顶、登录自启开', () => {
+    expect(readPrefs(tmp())).toEqual(DEFAULT_PREFS)
+    expect(DEFAULT_PREFS).toEqual({ muted: false, alwaysOnTop: false, openAtLogin: true })
+  })
+
+  it('写一个开关不会动到 panelX', () => {
+    const file = tmp()
+    const p = new PanelXConfig({ width: 480, height: 270 }, file)
+    p.nudge(0.02)                       // panelX 1.21，touched 真
+    writePref('muted', true, file)
+    const cfg = readConfig(file)
+    expect(cfg.panelX).toBe(1.21)
+    expect(cfg.touched).toBe(true)
+    expect(cfg.muted).toBe(true)
+    // 反过来也一样：调 panelX 不该把静音抹掉
+    p.nudge(0.02)
+    expect(readConfig(file).muted).toBe(true)
+  })
+
+  it('用户手加的字段不会被抹掉', () => {
+    const file = tmp()
+    writeFileSync(file, JSON.stringify({ panelX: 1.19, 我的备注: 'hi' }))
+    writePref('alwaysOnTop', true, file)
+    const raw = JSON.parse(readFileSync(file, 'utf8'))
+    expect(raw['我的备注']).toBe('hi')
+    expect(raw.alwaysOnTop).toBe(true)
+    expect(raw.panelX).toBe(1.19)
+  })
+
+  it('非布尔值一律当没写过，回落默认', () => {
+    const file = tmp()
+    writeFileSync(file, JSON.stringify({ muted: 'yes', alwaysOnTop: 1, openAtLogin: null }))
+    expect(readPrefs(file)).toEqual(DEFAULT_PREFS)
+  })
+
+  it('坏 JSON 也能写进去（当它不存在，从 patch 起一份新的）', () => {
+    const file = tmp()
+    writeFileSync(file, '{ broken')
+    expect(writePref('muted', true, file)).toBe(true)
+    expect(readPrefs(file).muted).toBe(true)
   })
 })

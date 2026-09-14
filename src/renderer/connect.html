@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self' data:; img-src 'none'; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<title>连接 ZCode</title>
+<!--
+  400×160 的一件事窗口（简报 §1）：一行说明、一个密码框、保存 / 取消。
+  这里**不** import design/tokens.css —— 那份是 480×270 画布的真源，
+  拖进来会把一整套画布变量带进一个系统外观的小窗。只取四个颜色值，写死在下面。
+-->
+</head>
+<body>
+
+<main class="box">
+  <p class="lede" id="lede">粘贴智谱 bigmodel 的 API Key，保存进 macOS 钥匙串，不落盘明文。</p>
+  <input id="key" type="password" autocomplete="off" spellcheck="false"
+         aria-labelledby="lede" placeholder="API Key">
+  <p class="msg" id="msg" role="status" aria-live="polite"></p>
+  <div class="row">
+    <button id="cancel" type="button">取消</button>
+    <button id="save" type="button" class="primary">保存</button>
+  </div>
+</main>
+
+<script type="module" src="./connect.ts"></script>
+</body>
+</html>

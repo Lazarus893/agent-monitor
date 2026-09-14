@@ -47,6 +47,8 @@ export class MonitorWindow {
   private debounce: NodeJS.Timeout | null = null
   private settleTimer: NodeJS.Timeout | null = null
   private relocating = false
+  /** watch() 装上的三个 screen 监听的摘除函数 */
+  private offScreen: (() => void) | null = null
   /** 变化队列：settle 期间到达的只延后，不丢弃 */
   private queue = new RelocateQueue()
   private current: Target | null = null
@@ -64,19 +66,31 @@ export class MonitorWindow {
       backgroundColor: CANVAS_BG,
       title: 'Agent Monitor',
       webPreferences: {
-        // package.json 是 "type": "module"，electron-vite 把 preload 产成 .mjs；
-        // ESM preload 要求 sandbox: false，contextIsolation 仍然是 true。
-        preload: join(here, '../preload/index.mjs'),
+        /* M4 · preload 改成 CJS（electron.vite.config.ts 里指定 format/后缀），
+           于是 `sandbox: true` 能开了（M1 复核 §9.5-1）。
+           M1–M3 一直是 `.mjs` + `sandbox: false` —— ESM preload 不允许沙箱，
+           代价是 preload 跑在一个有完整 Node 的渲染进程里。
+           这个 preload 只用 ipcRenderer / contextBridge，沙箱里都在。 */
+        preload: join(here, '../preload/index.cjs'),
         contextIsolation: true,
         nodeIntegration: false,
-        sandbox: false
+        sandbox: true
       }
     })
 
-    // 面板上不该有任何能跳出去的东西；真出现外链就交给系统浏览器，别在副屏里导航
+    /* 面板上不该有任何能跳出去的东西。
+       M1 复核 §9.5-2：原来这里把**任意** URL 交给 `shell.openExternal` ——
+       包括 `file://` 与自定义 scheme，那等于把一个「点一下就让系统打开任意路径」
+       的口子留在保险丝里。只放行 https，其余记一行丢掉。
+       同时补上 `will-navigate`：真发生一次同窗口导航，面板会被导走且回不来。 */
     this.win.webContents.setWindowOpenHandler(({ url }) => {
-      void shell.openExternal(url)
+      if (url.startsWith('https://')) void shell.openExternal(url)
+      else console.warn(`[window] 拦下非 https 的外链：${url.slice(0, 64)}`)
       return { action: 'deny' }
+    })
+    this.win.webContents.on('will-navigate', (ev, url) => {
+      console.warn(`[window] 拦下导航：${url.slice(0, 96)}`)
+      ev.preventDefault()
     })
 
     this.win.once('ready-to-show', () => {
@@ -93,11 +107,22 @@ export class MonitorWindow {
 
   /** 开始盯着显示器变化 —— 拔掉 / 插回都要在 2s 内落位 */
   watch(): void {
-    screen.on('display-added', () => this.schedule())
-    screen.on('display-removed', () => this.schedule())
-    screen.on('display-metrics-changed', (_e, _display, changedMetrics: string[]) => {
+    /* 监听器留着引用，dispose 时要摘（M1 复核 §9.5-6）。
+       M1 是「关窗即退出进程」所以漏掉无害；M4 有了托盘，窗口销毁之后进程还活着，
+       这三个回调会继续持有 this 并对着一个已销毁的窗口跑 relocate。 */
+    const onAdded = (): void => this.schedule()
+    const onRemoved = (): void => this.schedule()
+    const onMetrics = (_e: unknown, _d: unknown, changedMetrics: string[]): void => {
       this.schedule(changedMetrics)
-    })
+    }
+    this.offScreen = () => {
+      screen.off('display-added', onAdded)
+      screen.off('display-removed', onRemoved)
+      screen.off('display-metrics-changed', onMetrics)
+    }
+    screen.on('display-added', onAdded)
+    screen.on('display-removed', onRemoved)
+    screen.on('display-metrics-changed', onMetrics)
     this.signature = displaySignature(allDisplays())
     this.timer = setInterval(() => {
       // 指纹在这里**不消费** —— 它由 relocate() 处理完之后才更新。
@@ -113,6 +138,8 @@ export class MonitorWindow {
     if (this.debounce) clearTimeout(this.debounce)
     if (this.settleTimer) clearTimeout(this.settleTimer)
     this.timer = this.debounce = this.settleTimer = null
+    this.offScreen?.()
+    this.offScreen = null
   }
 
   /**
@@ -180,6 +207,7 @@ export class MonitorWindow {
         this.settleTimer = null
         this.relocating = false
         this.signature = displaySignature(allDisplays())
+        this.verify()
         this.queue.unblock()
         // settle 期间攒下的变化在这里补跑 —— 它们只是被延后，没有被丢掉
         if (this.queue.pending) this.schedule()
@@ -187,9 +215,39 @@ export class MonitorWindow {
     }
   }
 
-  /** 当前落在哪块屏上（截图脚本与日志用） */
+  /**
+   * 落位**之后**再对一次账，并把结果记进日志。
+   *
+   * 原来只在 setBounds **之前**记一行（那时 `win=` 还是旧位置），于是「有没有真的铺满」
+   * 在日志里根本看不出来 —— 实机上窗口比 TYPE-C 四边各缩了 9 / 5 px，日志一片正常。
+   * 常驻面板没人逐像素盯，这一行就是唯一会说话的地方。
+   */
+  private verify(): void {
+    if (this.win.isDestroyed()) return
+    const b = this.win.getBounds()
+    const t = this.current
+    const full = this.win.isSimpleFullScreen()
+    if (!t) {
+      console.log(`[displays] 落位后（主屏窗口）win=${fmt(b)} fullscreen=${full}`)
+      return
+    }
+    const g = t.bounds
+    const exact = b.x === g.x && b.y === g.y && b.width === g.width && b.height === g.height
+    console.log(
+      `[displays] 落位后 win=${fmt(b)} fullscreen=${full} 目标=${fmt(g)} ` +
+      (exact ? '逐像素吻合' :
+        `**没铺满** Δ左${b.x - g.x} Δ上${b.y - g.y} Δ宽${b.width - g.width} Δ高${b.height - g.height}`)
+    )
+  }
+
+  /** 当前落在哪块屏上（截图脚本、selftest 与日志用） */
   target(): Target | null {
     return this.current
+  }
+
+  /** 窗口此刻的 bounds（selftest 断言用） */
+  bounds(): { x: number; y: number; width: number; height: number } {
+    return this.win.getBounds()
   }
 }
 

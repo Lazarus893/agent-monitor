@@ -21,6 +21,26 @@ const FONT_FLOOR = 14;                       // R4-06 · 轮播版把下限从 1
 const SCALE = [0, 2, 4, 8, 12, 16, 24, 32];
 const SPACING_EXCEPTIONS = ['6px paddingBottom on .'];   // 与 tokens.css §6 逐条对应
 
+// ---------------- 移植契约（m3-executor 的 stage-css-port 测试依赖它） ----------------
+// 他那边断言 app.css 的 STAGE 段与本文件第三个 <style> 块逐字相同。那条断言锚在
+// 「第三个」这个序数上，而序数是我这边的实现细节——我多加一个 style 块，他那条测试
+// 就会无缘无故变红或变绿。既然这个不变量归我维护，就该由我先断言它：
+// 出问题时先红在我这边，而不是红在下游。
+{
+  const src = fs.readFileSync(FILE.replace('file://', ''), 'utf8');
+  const blocks = [...src.matchAll(/<style>([\s\S]*?)<\/style>/g)].map(m => m[1]);
+  const fail = [];
+  if (blocks.length !== 3) fail.push(`<style> 块数是 ${blocks.length}，不是 3`);
+  const stage = blocks[2] || '';
+  if (!stage.includes('STAGE —— 画布坐标')) fail.push('第三块不是 STAGE 段');
+  for (const sel of ['.page-a', '.page-b', '.page-c', '.page-d', '.page-e', '.page-attn'])
+    if (!stage.includes(sel)) fail.push(`STAGE 段缺 ${sel}（漏一页就是漏移植）`);
+  if (!stage.includes('.page-e .e-time{flex:none')) fail.push('STAGE 段缺 .e-time{flex:none（时间列的命就在这半条）');
+  if (stage.includes('.harness')) fail.push('STAGE 段混进了 .harness（工具样式不该被移植）');
+  console.log('移植契约:', fail.length ? fail : `ok（3 个 style 块，STAGE 段 ${stage.length} 字节）`);
+  if (fail.length) process.exitCode = 1;
+}
+
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1100, height: 900 }, deviceScaleFactor: 2 });
 const consoleErrors = [];
@@ -176,6 +196,26 @@ for (const cv of CANVASES) {
         }
       }
 
+      // 4e · REVISION 7：B 页三条填充必须是三家各自的身份色，而且互不相同。
+      //      这是内容级断言：填充是对的颜色，不只是「有个填充」。
+      //      身份色是分类色，不计入 accent —— accent 扫的是 #f4f4f6，三者都不是。
+      let fillWrong = '';
+      if (live && live.dataset.p === 'b') {
+        const seen2 = [];
+        for (const u of live.querySelectorAll('.band .used')) {
+          const c = getComputedStyle(u).backgroundColor;
+          if (c === 'rgb(244, 244, 246)') fillWrong = '填充用了 accent 白';
+          seen2.push(c);
+        }
+        if (seen2.length === 3 && new Set(seen2).size !== 3)
+          fillWrong = `三条填充不是三个颜色: ${seen2.join(' / ')}`;
+      }
+
+      // 4f · D 页在 ok / edge 下必须真的画出格子。原来 edge 落进了空态分支，
+      //      七态里 D 只有四种渲染，而所有结构性断言照样全绿——空态不溢出。
+      let heatCells = -1;
+      if (live && live.dataset.p === 'd') heatCells = live.querySelectorAll('.cell[data-date]').length;
+
       // 5 · accent：按计算颜色全量扫描，只数当前可见页
       const ACCENT = 'rgb(244, 244, 246)';
       const accentEls = [];
@@ -191,7 +231,7 @@ for (const cv of CANVASES) {
           accentEls.push(typeof n.className === 'string' && n.className ? n.className : n.tagName);
       }
       return {
-        problems: out, accentEls, accent: accentEls.length, minFont, newsNoTime,
+        problems: out, accentEls, accent: accentEls.length, minFont, newsNoTime, fillWrong, heatCells,
         offScale: [...new Set(offScale)], focusableHidden,
         headings: stage.querySelectorAll('h1,h2,h3,[role=heading]').length,
         statusEls: stage.querySelectorAll('[role="status"]').length,
@@ -206,6 +246,9 @@ for (const cv of CANVASES) {
     if (s === 'loading' && r.statusEls < 1) r.problems.push('LOADING no role=status');
     if (r.clocks < 1) r.problems.push('CLOCK missing');
     if (r.newsNoTime > 0) r.problems.push(`E 页有 ${r.newsNoTime} 条新闻没渲染出时间`);
+    if (r.fillWrong) r.problems.push(`B 页填充色: ${r.fillWrong}`);
+    if (p === 'd' && ['populated','edge','attention','running'].includes(s) && r.heatCells === 0)
+      r.problems.push('D 页该出图的状态下一个格子都没有');
     // R5-01 · inert 断言
     if (r.focusableHidden > 0) r.problems.push(`INERT 非当前页仍有 ${r.focusableHidden} 个可聚焦元素`);
     // R5-05 · 例外清单断言：实测的 off-scale 集合必须等于声明的例外集合
@@ -226,6 +269,23 @@ console.log('\n轨道 / 填充 / 缺口对比度:');
 for (const [n, v] of trackReportOnce || []) console.log(`  ${n.padEnd(22)} ${v}:1 ${v >= 3 ? 'PASS' : (n.startsWith('fill-vs-track') ? '(参考，边界由缺口承担)' : 'FAIL')}`);
 
 // ---------------- 截图：panelX 1.0 作对照 + 1.19 实机系数（-x119） ----------------
+// m3-executor 发现交付截图里混进过自检注入的合成事件行。我这边靠「截图在所有
+// 模拟操作之前」侥幸是干净的，但没有任何东西在守着这个顺序——一旦有人把截图段
+// 挪到节奏断言后面，交付图里就会混进「模拟新事件」的行，而且看起来完全正常。
+// 顺序不是保证，断言才是：每张图拍之前验一遍画布里没有合成 id。
+const shotPurity = [];
+async function assertClean(label) {
+  const dirty = await page.evaluate(() => {
+    const bad = [];
+    for (const r of document.querySelectorAll('#stage .row')) {
+      const id = r.dataset.id || '';
+      if (id.startsWith('new') || id.startsWith('attn-')) bad.push(id);
+    }
+    return bad;
+  });
+  if (dirty.length) shotPurity.push(`${label}: ${dirty.join(', ')}`);
+}
+
 const SHOT_PAGES = [['a','page-a'],['b','page-b'],['c1','page-c'],['c2','page-c2'],['d','page-d'],['e','page-e']];
 for (const px of [1.00, 1.19]) {
   const sfx = px === 1.19 ? '-x119' : '';
@@ -236,10 +296,12 @@ for (const px of [1.00, 1.19]) {
   await page.waitForTimeout(320);
   for (const [p, name] of SHOT_PAGES) {
     await page.click(`#segPage button[data-p="${p}"]`); await page.waitForTimeout(380);
+    await assertClean(`${name}${sfx}`);
     await page.locator('#stage').screenshot({ path: `${SHOTS}/${name}${sfx}.png` });
   }
   await page.click('#segState button[data-s="attention"]');
   await page.click('#segPage button[data-p="attn"]'); await page.waitForTimeout(380);
+  await assertClean(`page-attention${sfx}`);
   await page.locator('#stage').screenshot({ path: `${SHOTS}/page-attention${sfx}.png` });
 }
 await page.evaluate(() => { const r = document.getElementById('rngPanel');
@@ -490,6 +552,7 @@ console.log('  纯净模式下按 →:', JSON.stringify(pureManual));
 if (pureManual.pure !== '1') pure.push('纯净模式被 → 退出了');
 
 console.log('\n纯净模式问题:', pure.length ? pure : 'none');
+console.log('\n截图纯净度:', shotPurity.length ? shotPurity : 'none（14 张图里没有合成事件行）');
 console.log('\nconsole errors:', consoleErrors.length ? consoleErrors : 'none');
 console.log('节奏问题:', rhythm.length ? rhythm : 'none');
 console.log('布局问题:', problems.length ? JSON.stringify(problems, null, 1) : 'none');

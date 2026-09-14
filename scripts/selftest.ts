@@ -13,7 +13,7 @@ import { appendFile, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promise
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { BrowserWindow } from 'electron'
-import { app, globalShortcut } from 'electron'
+import { app, globalShortcut, Menu, screen } from 'electron'
 import { CH } from '../src/shared/ipc.js'
 import { SCENE_NAMES } from '../src/shared/types.js'
 import type { AgentId, AgentStatus, MonitorCommand, Page } from '../src/shared/types.js'
@@ -27,6 +27,10 @@ import type { EventInput, EventSink } from '../src/main/collectors/events/types.
 import { scaleFor } from '../src/shared/scale.js'
 import { DEFAULT_CONFIG_FILE } from '../src/main/config.js'
 import { fileIn, load } from '../src/main/collectors/events/persist.js'
+import { closeConnectWindow, openConnectWindow } from '../src/main/connect.js'
+import {
+  deleteKeychain, keychainItemExists, keychainTarget, readKeychain
+} from '../src/main/collectors/quota/keychain.js'
 
 /** 自检发的指令：showPage 的 token 由 sendCommand 补，调用处不写。
  *  （Omit 作用在联合类型上会把分支压平，所以这里显式列出来。） */
@@ -35,6 +39,22 @@ type CommandInput =
   | { type: 'showPage'; page: Page }
 
 const sleep = (ms: number): Promise<void> => new Promise(r => setTimeout(r, ms))
+
+/** 连接窗口那段主动跳过时抛它 —— 与真正的失败区分开 */
+class SkipConnectCheck extends Error {}
+
+/**
+ * 自检的截图一律落在 `design/shots/selftest/` 下（M4 修）。
+ *
+ * 原来它写的是 `design/shots/m2` 与 `design/shots/m3` —— 和 `pnpm shoot` 同一个目录。
+ * 两条 lane 的产物于是互相覆盖，而且文件名与口径都不同：shoot 按 `page-<slug>-<态>` 命名、
+ * 喂的是冻住的 fixtures；selftest 按 `page-<page>-<态>` 命名、跑的是真实采集之后的场景。
+ * 谁最后跑谁说了算，交付截图因此会悄悄变成另一条 lane 的那一版。
+ *
+ * 归档用的交付截图由 `pnpm shoot`（七态对账）与 `MONITOR_SHOTS_LIVE_DIR`（真实六页）产出，
+ * 这里的只是自检过程的留档。
+ */
+const shotDir = (sub: string): string => join(process.cwd(), 'design', 'shots', 'selftest', sub)
 
 /** 当前页里有没有任何可见元素越出 .screen。.sr 是 1px 的屏幕阅读器锚点，按定义在框外。 */
 /**
@@ -165,6 +185,65 @@ export async function runSelftest(win: BrowserWindow, store?: Store): Promise<bo
   // 0.0 · 首轮真实采样（M2 验收 1 的机械证据）。codexbar 冷启动实测 3 s 出头，
   // 预算给到 60 s —— 简报要求的就是「60 s 内出现真实数字」。
   const sampledIn = await waitForFirstSample(win, 60_000)
+  /* ==========================================================================
+     应用菜单里不能有关窗口的路（M4 复核 P1-③）。
+     不设菜单时挂的是 Electron 默认菜单，⌘W 会把面板关掉 —— 对一个 24/7
+     没人盯着的监视器来说，最糟的失败形态就是它安静地整个消失。
+     ⌘Q 要留着（那是有意的退出路径），⌘V 也要留着（连接 ZCode 的输入框要粘贴）。
+     ========================================================================== */
+  {
+    const menu = Menu.getApplicationMenu()
+    const flat: Array<{ label: string; accel: string; role: string }> = []
+    const walk = (items: Electron.MenuItem[]): void => {
+      for (const it of items) {
+        flat.push({
+          label: it.label || '', accel: it.accelerator || '', role: String(it.role ?? '')
+        })
+        if (it.submenu) walk(it.submenu.items)
+      }
+    }
+    if (menu) walk(menu.items)
+    const has = (r: string): boolean => flat.some(x => x.role.toLowerCase() === r)
+    const closers = flat.filter(x =>
+      ['close', 'toggledevtools', 'reload', 'forcereload'].includes(x.role.toLowerCase()))
+    check('应用菜单里没有 ⌘W / DevTools / 重载，⌘Q 与粘贴仍在',
+      !!menu && closers.length === 0 && has('quit') && has('paste'),
+      menu
+        ? `顶级 ${menu.items.map(i => i.label || i.role).join(' / ')} · ` +
+          `关窗类 ${closers.length ? closers.map(c => c.role).join(',') : '无'} · ` +
+          `quit=${has('quit')} paste=${has('paste')}`
+        : '没有设置应用菜单（挂的是 Electron 默认菜单，带 ⌘W）')
+  }
+
+  /* ==========================================================================
+     窗口有没有**逐像素**铺满目标显示器。
+     两条独立证据，缺一不可：
+       · `win.getBounds()` 与 display.bounds 完全相等（Electron 侧的账）；
+       · `capturePage()` 出来的位图尺寸 = bounds × scaleFactor（真正画出来的像素数）。
+     只看第一条不够 —— 它是「我们要求的」；第二条才是「实际渲染出来的」。
+     补这一条的由头：外部用 CGWindowList 量到窗口比屏幕小约 2%。那个数字**不可信**，
+     四块屏上任何带内容的窗口都会被它报小 ~2%（内建 1728→1694、Mi 1920→1882、
+     TYPE-C 960→942），内容图层一撤掉立刻回到准确值。真正说话的是这里的位图尺寸。
+     ========================================================================== */
+  {
+    const target = screen.getAllDisplays().find(d => (d.label || '').toUpperCase().includes('TYPE-C'))
+    const b = win.getBounds()
+    if (!target) {
+      check('窗口逐像素铺满目标显示器', true, '副屏不在，跳过（回落主屏窗口是另一条路）')
+    } else {
+      const g = target.bounds
+      const exact = b.x === g.x && b.y === g.y && b.width === g.width && b.height === g.height
+      const img = (await win.webContents.capturePage()).getSize()
+      const wantW = g.width * target.scaleFactor
+      const wantH = g.height * target.scaleFactor
+      const pixels = img.width === wantW && img.height === wantH
+      check('窗口逐像素铺满目标显示器（bounds 相等 + 位图尺寸 = bounds × 倍率）',
+        exact && pixels && win.isSimpleFullScreen(),
+        `win=${b.width}x${b.height}@${b.x},${b.y} 目标=${g.width}x${g.height}@${g.x},${g.y} ` +
+        `位图=${img.width}x${img.height}（应为 ${wantW}x${wantH}） fullscreen=${win.isSimpleFullScreen()}`)
+    }
+  }
+
   check('首轮真实采样落地（骨架屏退场）', sampledIn >= 0,
     sampledIn >= 0 ? `${sampledIn}ms` : '60 s 内仍是骨架屏')
 
@@ -291,7 +370,7 @@ export async function runSelftest(win: BrowserWindow, store?: Store): Promise<bo
   // 6.65 · 真实数字的肉眼证据（M2 验收 2 的截图部分）。数字与倒计时之外画面上没有别的，
   // 不会有凭据进图。
   try {
-    const dir = join(process.cwd(), 'design', 'shots', 'm2')
+    const dir = shotDir('quota')
     await mkdir(dir, { recursive: true })
     for (const p of ['a', 'b'] as const) {
       await sendCommand(win, { type: 'showPage', page: p })
@@ -352,6 +431,186 @@ export async function runSelftest(win: BrowserWindow, store?: Store): Promise<bo
   const restored = await force(null, 2500)
   check('解除模拟后自动恢复真实数字', restored.num === before.num && !restored.stale,
     `${restored.num || '(无数字)'} ← 原 ${before.num}`)
+
+  /* ==========================================================================
+     REVISION 7（原型 2026-09-14）· 额度条改用各家身份色，阈值不再重绘整条。
+     这三条量的是**计算样式**，不是 class：CSS 变量链断了一环（比如 tokens 少了
+     --quota-fill-zcode、或者瓦片没带 --fill），class 照样在，颜色却回落成透明。
+     它们要切 fixtures 场景，所以只在 store 在手时跑（截图模式不传 store）。
+     ========================================================================== */
+  if (store) {
+    store.setScene('populated')
+    await sleep(200)
+    await sendCommand(win, { type: 'showPage', page: 'b' })
+    await sleep(120)
+    const fills = await js<Array<{ id: string; used: string; ident: string }>>(win, `
+      (() => {
+        const ids = ['codex','claude','zcode']
+        return [...document.querySelectorAll('.page-b .tile')].map((t, i) => {
+          const used = t.querySelector('.band .used')
+          const cs = used ? getComputedStyle(used).backgroundColor : ''
+          const ident = getComputedStyle(document.documentElement)
+            .getPropertyValue('--id-' + ids[i]).trim()
+          return { id: ids[i], used: cs, ident }
+        })
+      })()`)
+    // 三条填充必须两两不同、都不是 accent 白、且分别等于该家的身份色
+    const rgb = await js<Record<string, string>>(win, `
+      (() => {
+        const out = {}
+        const probe = document.createElement('span')
+        document.body.appendChild(probe)
+        for (const id of ['codex','claude','zcode']) {
+          probe.style.color = getComputedStyle(document.documentElement)
+            .getPropertyValue('--id-' + id).trim()
+          out[id] = getComputedStyle(probe).color
+        }
+        probe.remove()
+        return out
+      })()`)
+    // 两边都经过浏览器解析成 rgb() 字符串，可以直接比
+    const same = fills.filter(f => f.used === rgb[f.id]).length
+    const distinct = new Set(fills.map(f => f.used)).size
+    check('B 页三条填充分别等于各自身份色，且三色互不相同',
+      same === 3 && distinct === 3,
+      fills.map(f => `${f.id}=${f.used}`).join(' '))
+  }
+
+  if (store) {
+    /* edge 场景里有 ≥80% 与 ≥95% 的窗口 —— 阈值信号必须在颜色之外还有一个形状：
+       .b-alert 图标 + aria-label。只把数字改成黄/红是纯颜色信号（WCAG 1.4.1）。 */
+    store.setScene('edge')
+    await sleep(200)
+    await sendCommand(win, { type: 'showPage', page: 'b' })
+    await sleep(120)
+    const alerts = await js<Array<{ label: string; level: string; fill: string }>>(win, `
+      [...document.querySelectorAll('.page-b .tile')].map(t => ({
+        level: t.dataset.level || '',
+        label: t.querySelector('.b-alert')?.getAttribute('aria-label') || '',
+        fill: (() => { const u = t.querySelector('.band .used')
+          return u ? getComputedStyle(u).backgroundColor : '' })()
+      }))`)
+    const flagged = alerts.filter(a => a.level === 'warn' || a.level === 'danger')
+    const labelled = flagged.filter(a =>
+      a.label === (a.level === 'danger' ? '余量吃紧' : '余量偏紧'))
+    // 同时确认：吃紧的那条填充**没有**被重绘成红/黄（身份色仍在）
+    const okColour = flagged.every(a => a.fill && a.fill !== 'rgb(255, 97, 97)' && a.fill !== 'rgb(255, 197, 51)')
+    check('edge：吃紧/偏紧的瓦片带 .b-alert 与 aria-label，填充仍是身份色',
+      flagged.length > 0 && labelled.length === flagged.length && okColour,
+      flagged.length
+        ? flagged.map(a => `${a.level}:${a.label || '(缺 aria-label)'}:${a.fill}`).join(' ')
+        : '（edge 场景里没有 ≥80% 的窗口，这条失去意义）')
+  }
+
+  if (store) {
+    /* 回归 · D 页在 edge 场景下不再抛。
+       原来 `dataStateFor` 对 edge 无条件返回 'edge'，而 edge 那份 fixtures 没有 usage，
+       紧接着的 `scene.usage!` 每次都抛 `reading 'days'`，整轮 onState 就此中断 ——
+       D 页留着上一个场景的内容，指示点数量也停在上一轮。 */
+    store.setScene('error')
+    await sleep(150)
+    await sendCommand(win, { type: 'showPage', page: 'd' })
+    await sleep(120)
+    store.setScene('edge')
+    await sleep(200)
+    await sendCommand(win, { type: 'showPage', page: 'd' })
+    await sleep(150)
+    const d = await js<{ text: string; cells: number; dots: number }>(win, `
+      ({ text: (document.getElementById('pdHeat')?.textContent || '').trim(),
+         cells: document.querySelectorAll('#pdHeat .cell[data-date]').length,
+         dots: document.querySelectorAll('#dots button').length })`)
+    /* 判据是「D 页画的是**它自己这一轮**的东西」，不绑死在具体哪一种：
+       有 usage 就该出格子，没有就该出空态 —— 两者都对；错的是留着上一个场景
+       （error）那句「用量数据读取失败」，那说明这一轮的渲染根本没跑完。
+       这么写是为了不被 fixtures 牵着走：原型刚把 edge 从「空态」改成
+       「一天远超其余」的离群帧，等那份 fixtures 移植进来，这条不该跟着变红。 */
+    const own = d.cells > 0 || d.text.includes('还没有用量数据')
+    check('回归：edge 场景下 D 页画的是自己这一轮，不是上一个场景的残留',
+      own && !d.text.includes('读取失败'),
+      `${d.cells} 个格子 · ${d.text.slice(0, 20)} · 指示点 ${d.dots}`)
+    /* 切回 live —— 上面三段都把 store 推进了 scene 模式，不还原的话
+       后面整个 M3 事件段收不到任何真实事件（实测：四条全红）。 */
+    store.setLive()
+    await sleep(200)
+  }
+
+  /* ==========================================================================
+     M4 ·「连接 ZCode」窗口：托盘 → 小窗 → 钥匙串 这条路走一遍**真的**。
+     service / account 用临时名（MONITOR_KEYCHAIN_SERVICE），
+     **绝不碰真实的 agent-monitor / zcode-bigmodel**；跑完就删。
+     这条盯的是两个只有整条路跑起来才暴露的失败：
+       · 沙箱 preload 被 rollup 拆成 chunks → window.connectApi 根本不存在；
+       · sender 校验写错 → 保存静默失败。
+     ========================================================================== */
+  {
+    const SERVICE = 'agent-monitor-selftest'
+    const ACCOUNT = 'zcode-probe'
+    const before = { s: process.env['MONITOR_KEYCHAIN_SERVICE'], a: process.env['MONITOR_KEYCHAIN_ACCOUNT'] }
+    process.env['MONITOR_KEYCHAIN_SERVICE'] = SERVICE
+    process.env['MONITOR_KEYCHAIN_ACCOUNT'] = ACCOUNT
+    // 带空格与引号，顺便把 security -i 的转义也验了
+    const PROBE = 'selftest.' + Date.now() + ' a"b\\c'
+    try {
+      /* 保险丝（M4 P1-② 的直接后果）：项名覆盖在打包产物里是**关掉**的，
+         所以这段如果跑在打包版里，下面那一次保存会写进**用户真实的**
+         agent-monitor / zcode-bigmodel，把他的 Key 冲掉。
+         所以先确认覆盖真的生效了，没生效就整段不跑 —— 宁可少一条断言。 */
+      const t = keychainTarget('agent-monitor', 'zcode-bigmodel')
+      if (t.service !== SERVICE || t.account !== ACCOUNT) {
+        check('连接 ZCode：小窗保存 → 钥匙串读回逐字相同（临时项，不碰真实 Key）', true,
+          `跳过：项名覆盖未生效（打包产物里按设计关闭），不能在真实项上做写入测试。` +
+          `实际会写到 ${t.service}/${t.account}`)
+        throw new SkipConnectCheck()
+      }
+      await deleteKeychain(SERVICE, ACCOUNT)   // 上一程留下的残余
+      const cw = openConnectWindow({ rendererUrl: process.env['ELECTRON_RENDERER_URL'] })
+      await new Promise<void>(r => {
+        if (!cw.webContents.isLoading()) return r()
+        cw.webContents.once('did-finish-load', () => r())
+      })
+      await sleep(300)
+      const bridge = await cw.webContents.executeJavaScript(
+        `typeof window.connectApi?.save === 'function' && typeof window.connectApi?.close === 'function'`
+      ) as boolean
+      // 直接填框 + 点「保存」，走的是用户真的会走的那条路
+      await cw.webContents.executeJavaScript(`(() => {
+        const i = document.getElementById('key')
+        i.value = ${JSON.stringify(PROBE)}
+        document.getElementById('save').click()
+        return true
+      })()`)
+      let back: string | null = null
+      for (let i = 0; i < 25 && back !== PROBE; i++) {
+        await sleep(200)
+        back = await readKeychain(SERVICE, ACCOUNT)
+      }
+      check('连接 ZCode：小窗保存 → 钥匙串读回逐字相同（临时项，不碰真实 Key）',
+        bridge && back === PROBE,
+        bridge ? (back === PROBE ? `${SERVICE}/${ACCOUNT} 往返一致` : `读回 ${back === null ? 'null' : '不一致'}`)
+          : 'window.connectApi 不存在（preload 没加载起来）')
+      await deleteKeychain(SERVICE, ACCOUNT)
+      const gone = await readKeychain(SERVICE, ACCOUNT)
+      // 真实那一项只问「在不在」，不取明文 —— 取明文会弹授权框，也没必要（复核 §7.4）
+      const realStillThere = await keychainItemExists('agent-monitor', 'zcode-bigmodel')
+      check('连接 ZCode：临时钥匙串项已清干净，真实项未被触碰',
+        gone === null && realStillThere,
+        gone === null ? `临时项已删，真实项${realStillThere ? '仍在' : '不见了！'}` : '临时项没删掉')
+      closeConnectWindow()
+      await sleep(200)
+    } catch (err) {
+      if (!(err instanceof SkipConnectCheck)) {
+        check('连接 ZCode：小窗保存 → 钥匙串读回逐字相同（临时项，不碰真实 Key）', false, String(err))
+      }
+    } finally {
+      if (before.s === undefined) delete process.env['MONITOR_KEYCHAIN_SERVICE']
+      else process.env['MONITOR_KEYCHAIN_SERVICE'] = before.s
+      if (before.a === undefined) delete process.env['MONITOR_KEYCHAIN_ACCOUNT']
+      else process.env['MONITOR_KEYCHAIN_ACCOUNT'] = before.a
+      // 小窗抢过焦点，把面板还回去，后面的键盘相关检查才不会莫名其妙
+      win.focus()
+      await sleep(200)
+    }
+  }
 
   /* ==========================================================================
      M3 · 事件采集（简报「测试」一节的四条 selftest）。
@@ -479,6 +738,66 @@ export async function runSelftest(win: BrowserWindow, store?: Store): Promise<bo
       check('Claude：POST 一条带 token 的 Stop → 2 s 内 C 页多出一行', false, String(err))
     }
 
+    /* M3 复核 §6.3 · `esc()` 是一道真实的安全边界，之前没有任何用例守着。
+       M3 之后渲染层吃的是**用户能写的任意文本**（prompt、会话摘要、cwd 路径），
+       下一个往 rowHTML 里加字段的人漏掉 esc()，不会有任何东西变红。
+       这一条把整条路走完：transcript 里的一句 prompt → 采集 → 状态 → C 页 DOM。 */
+    try {
+      const sid = 'selftest-xss-' + Date.now()
+      const PAYLOAD = '<img src=x onerror="document.title=\'PWNED\'">'
+      const tdir = await mkdtemp(join(tmpdir(), 'selftest-xss-'))
+      const tpath = join(tdir, 'transcript.jsonl')
+      await writeFile(tpath, [
+        JSON.stringify({ type: 'user', message: { content: `修一下 ${PAYLOAD} 这个` } }),
+        JSON.stringify({ type: 'assistant', message: { content: `<script>alert(1)</script> 好了` } })
+      ].join('\n') + '\n')
+
+      const token = (await readFile(tokenFile(), 'utf8')).trim()
+      const titleBefore = await js<string>(win, 'document.title')
+      const res = await fetch(`http://127.0.0.1:${hookPort()}/hook`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-monitor-token': token },
+        body: JSON.stringify({
+          hook_event_name: 'Stop', session_id: sid,
+          cwd: '/tmp/<b>cwd</b>', transcript_path: tpath
+        })
+      })
+      let id = ''
+      const t0 = Date.now()
+      while (Date.now() - t0 < 2_000 && !id) {
+        id = store.get().events.find(e => e.sessionId === sid)?.id ?? ''
+        if (!id) await sleep(100)
+      }
+      if (id) await waitRow(id, 2_000)
+      await sendCommand(win, { type: 'showPage', page: 'c1' })
+      await sleep(200)
+
+      const probe = await js<{
+        injected: number; title: string; text: string; raw: boolean
+      }>(win, `(() => {
+        const feed = document.getElementById('pc1Feed')
+        return {
+          /* 只在事件区里数：页面本身有 <script type="module">，
+             对着 document 数会恒为非零，这条断言就永远红。
+             <b> 也算证据 —— cwd 里那对 <b> 标签如果变成了元素，说明没过 esc()。 */
+          injected: feed ? feed.querySelectorAll('img, script, iframe, object, embed, b').length : -1,
+          title: document.title,
+          text: feed ? feed.textContent : '',
+          // 尖括号必须是**文本**：innerHTML 里应当是 &lt;img，而不是一个 <img 标签
+          raw: !!feed && feed.innerHTML.includes('&lt;img src=x')
+        }
+      })()`)
+
+      const ok = res.status === 204 && !!id && probe.injected === 0 &&
+        probe.title === titleBefore && probe.raw &&
+        probe.text.includes('<img src=x onerror=')
+      check('C 页把不可信文本当文本渲染：注入的标签没有变成元素（复核 §6.3）', ok,
+        `注入元素 ${probe.injected} 个 · document.title ${probe.title === titleBefore ? '未被改写' : '被改写了！'}` +
+        ` · 尖括号${probe.raw ? '已转义' : '未转义'}`)
+    } catch (err) {
+      check('C 页把不可信文本当文本渲染：注入的标签没有变成元素（复核 §6.3）', false, String(err))
+    }
+
     // M3-4 · 重启语义：恢复之后全部已读，且同 id 不会再被当成新事件
     const unreadBefore = store.unread()
     const snapshot = store.get().events
@@ -596,7 +915,7 @@ export async function runSelftest(win: BrowserWindow, store?: Store): Promise<bo
       await js(win, `(() => { const r = document.documentElement.style
         r.setProperty('--canvas-w','403px'); r.setProperty('--canvas-h','270px')
         r.setProperty('--scale-x','2.38'); r.setProperty('--scale-y','2') })()`)
-      const dir = join(process.cwd(), 'design', 'shots', 'm3')
+      const dir = shotDir('states')
       await mkdir(dir, { recursive: true })
       let n = 0
       for (const st of SCENE_NAMES) {
@@ -636,7 +955,13 @@ export async function runSelftest(win: BrowserWindow, store?: Store): Promise<bo
       store.restoreEvents(load(realUserData()))
       store.setLive()
       await sleep(400)
-      const dir = join(process.cwd(), 'design', 'shots', 'm3', 'live')
+      /* 交付用的六页真实截图要能指定去处（M4 放 design/shots/m4/ 给 polish-pass 用）：
+         `MONITOR_SHOTS_LIVE_DIR=design/shots/m4 pnpm selftest`。
+         不给就落在 selftest 自己的目录里。 */
+      const override = process.env.MONITOR_SHOTS_LIVE_DIR?.trim()
+      const dir = override
+        ? (override.startsWith('/') ? override : join(process.cwd(), override))
+        : shotDir('live')
       await mkdir(dir, { recursive: true })
       const got: string[] = []
       for (const p of ['a', 'b', 'c1', 'c2', 'd', 'e'] as const) {
@@ -748,7 +1073,7 @@ export async function runSelftest(win: BrowserWindow, store?: Store): Promise<bo
     await sleep(500)
     // M2 起这两张拍的是真实采集的数据，所以落在 m2/ 下 —— M1 的对账截图是 fixtures 那一份，
     // 在 live 模式下已经复现不出来（时间原点变成了真时间），不该被顺手覆盖掉。
-    const dir = join(process.cwd(), 'design', 'shots', 'm3', 'native-960x640')
+    const dir = shotDir('native-960x640')
     await mkdir(dir, { recursive: true })
     for (const p of ['a', 'c1', 'd', 'e'] as const) {
       await sendCommand(win, { type: 'showPage', page: p })

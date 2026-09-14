@@ -13,7 +13,7 @@
  *   · 只改 statusLine.command 这一个字段，缩进沿用原文件。
  */
 
-import { copyFileSync, readFileSync, writeFileSync } from 'node:fs'
+import { copyFileSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -55,6 +55,29 @@ const settingsPath = at >= 0 && argv[at + 1]
   : join(homedir(), '.claude', 'settings.json')
 
 /** 沿用原文件的缩进，别把用户的 settings.json 重排成另一种风格 */
+/**
+ * 原子写（M4 复核 P1-①）。
+ *
+ * `writeFileSync` 对已存在的文件是 `open(..., 'w')` —— **先截断、再写**。
+ * 中间被打断（`install.ts` 给的 20 s 超时会发 SIGTERM，正好能落在这个窗口里；磁盘满同理）
+ * 就会留下一个 0 字节或半截的 `~/.claude/settings.json`，用户的 Claude Code 整个起不来。
+ * 这是本项目唯一会碰用户全局配置的地方，比我们自己的配置更该用这个写法
+ * （src/main/config.ts 早就是这么写的）。
+ *
+ * tmp 放在**同一个目录**，`rename` 才是同一文件系统上的原子操作。
+ * 失败时把 tmp 清掉，不给用户留一个 `settings.json.tmp` 的谜。
+ */
+function writeAtomic(file, body) {
+  const tmp = `${file}.tmp-${process.pid}`
+  try {
+    writeFileSync(tmp, body, { mode: 0o600 })
+    renameSync(tmp, file)
+  } catch (err) {
+    try { unlinkSync(tmp) } catch { /* 本来就没写出来 */ }
+    throw err
+  }
+}
+
 function detectIndent(text) {
   const m = text.match(/\n([ \t]+)"/)
   return m ? m[1] : '  '
@@ -103,14 +126,15 @@ function main() {
     return
   }
 
+  /* 备份 → 先打印备份路径 → 再原子写（复核 P1-①，理由见 writeAtomic） */
   const backup = `${settingsPath}.bak-${stamp()}`
   copyFileSync(settingsPath, backup)
+  console.log(`备份：${backup}`)
   settings.statusLine.command = next
   // 结尾换行沿用原文件：只改一个字段，就别顺手多加一个字节
   const tail = text.endsWith('\n') ? '\n' : ''
-  writeFileSync(settingsPath, JSON.stringify(settings, null, detectIndent(text)) + tail)
+  writeAtomic(settingsPath, JSON.stringify(settings, null, detectIndent(text)) + tail)
 
-  console.log(`备份：${backup}`)
   console.log(`statusLine.command：\n  旧 ${current}\n  新 ${next}`)
   console.log(uninstall
     ? '已还原。'
@@ -118,4 +142,10 @@ function main() {
       '（裁剪成 rate_limits + model.display_name，0600；需要 jq，没有 jq 则只转发不落盘）。')
 }
 
-main()
+/* 被 import 时不执行 —— 与 install-claude-hooks.mjs 一致。
+   原来这里是裸的 `main()`：谁 import 一下这个模块（写个单测就会），
+   它就当场对着**用户真实的** ~/.claude/settings.json 跑一遍安装。
+   本轮实测踩到过（`node -e "import(...)"` 直接打印了「已经是最新的包装形态」）。 */
+if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
+  main()
+}

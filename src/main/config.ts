@@ -1,12 +1,13 @@
 /**
  * 用户配置 —— `~/.agent-monitor/config.json`。
  *
- * 目前只装一个字段：`panelX`（横向压缩补偿）。
+ * 装两类东西：`panelX`（横向压缩补偿）与 M4 托盘的三个开关
+ * （静音 / 总在最前 / 登录时启动）。写入一律是**合并写**，见 writeConfig。
  *
  * 为什么需要它：副屏 EDID 原生面板是 960×640（3:2），用户在 960×540 @2x 下使用，
  * 画面被面板自己的缩放器横向压掉 15.6%，圆变成竖椭圆、字显得瘦。这是**显示器内部**
  * 的形变，macOS 与 Electron 都看不见它，只能由人眼校准一次再由我们补回去。
- * 用户 2026-09-14 用 design/aspect-test.html 的正圆实测：**1.19**。
+ * 用户 2026-09-14 用 design/tools/aspect-test.html 的正圆实测：**1.19**。
  *
  * 补偿方式（design/brief-m0-v2.md §5）：画布逻辑宽度缩成 round(480 / panelX)，
  * stage 横向再按 bounds.width / canvasW 拉回去。于是屏上 1 CSS px 宽 = 1 CSS px 高，
@@ -47,6 +48,12 @@ export const PANEL_X_STEP = 0.02
 export type Config = {
   /** 当前生效的补偿系数 */
   panelX?: number
+  /** 托盘「静音提示音」。默认关（有声）。 */
+  muted?: boolean
+  /** 托盘「总在最前」。默认关（简报 §1）。 */
+  alwaysOnTop?: boolean
+  /** 托盘「登录时启动」。默认开（简报 §2）。 */
+  openAtLogin?: boolean
   /**
    * 这个值是不是**用户自己调出来的**。
    *
@@ -63,17 +70,45 @@ export function defaultPanelX(canvas: { width: number; height: number }): number
   return canvas.height >= 300 ? PANEL_X_NATIVE : PANEL_X_COMPRESSED
 }
 
+/**
+ * 盘上那份对象的原样读取，不做任何净化。**读不出来时返回 null**，
+ * 与「读出来是个空对象」区分开 —— 调用方靠这个区别决定回落到什么。
+ *
+ * 合并写要用它 —— M3 复核 §3.4 记的前向陷阱：`writeConfig` 原来整份覆盖，
+ * 用户手加的字段（以及本文件还不认识的新字段）会被下一次 nudge 抹掉。
+ * M4 加了三个开关之后，「整份覆盖」立刻会变成真 bug：托盘勾静音会把 panelX 冲掉。
+ */
+function readRaw(file: string): Record<string, unknown> | null {
+  let text: string
+  try {
+    text = readFileSync(file, 'utf8')
+  } catch {
+    return null // 不存在 / 没权限 —— 第一次启动就是这一条，不值得记日志
+  }
+  try {
+    const raw: unknown = JSON.parse(text)
+    if (typeof raw !== 'object' || raw === null) throw new Error('不是对象')
+    return raw as Record<string, unknown>
+  } catch (err) {
+    // 文件在、但内容坏了：这个值得说一声，否则用户会以为自己编辑的那行生效了
+    console.warn(`[config] ${file} 解析失败，本次按默认值跑：${String(err)}`)
+    return null
+  }
+}
+
 export function readConfig(file = configFile()): Config {
   try {
-    const raw: unknown = JSON.parse(readFileSync(file, 'utf8'))
-    if (typeof raw !== 'object' || raw === null) return {}
-    const o = raw as Record<string, unknown>
+    const o = readRaw(file)
+    if (!o) return {}
     const panelX = o['panelX']
     const out: Config = {}
     if (typeof panelX === 'number' && Number.isFinite(panelX)) out.panelX = clampPanelX(panelX)
     // touched 只认显式的 true：老配置（M3 第一版写的 {panelX}）没有这一位，按「没调过」算，
     // 于是本机那份被污染的配置在下一次启动就自动复位，不需要用户手工删文件。
     out.touched = o['touched'] === true
+    if (typeof o['muted'] === 'boolean') out.muted = o['muted']
+    if (typeof o['alwaysOnTop'] === 'boolean') out.alwaysOnTop = o['alwaysOnTop']
+    if (typeof o['openAtLogin'] === 'boolean') out.openAtLogin = o['openAtLogin']
     return out
   } catch {
     // 不存在 / 坏 JSON / 没权限 —— 三种都回落默认，配置不该是启动的必要条件
@@ -81,8 +116,14 @@ export function readConfig(file = configFile()): Config {
   }
 }
 
-export function writeConfig(cfg: Config, file = configFile()): boolean {
+/**
+ * 合并写：盘上已有的字段一律保留，只覆盖 `patch` 里给出的那几个。
+ * 调用方因此可以只写自己关心的键（托盘写 muted，panelX 写 panelX），互不相冲。
+ */
+export function writeConfig(patch: Config, file = configFile()): boolean {
   try {
+    // 盘上那份坏了就当它不存在，从 patch 重新起一份 —— 写入不该被一份坏 JSON 卡死
+    const cfg = { ...(readRaw(file) ?? {}), ...patch }
     mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
     const tmp = file + '.tmp'
     writeFileSync(tmp, JSON.stringify(cfg, null, 1) + '\n', { mode: 0o600 })
@@ -142,4 +183,35 @@ export class PanelXConfig {
     writeConfig({ panelX: this.value, touched: false }, this.file)
     return this.value
   }
+}
+
+/* ==========================================================================
+   M4 · 托盘的三个开关。
+   它们与 panelX 共用同一个 config.json，但走合并写（见 writeConfig），
+   所以托盘勾一下不会把用户校准出来的 panelX 冲掉。
+   ========================================================================== */
+
+export type Prefs = {
+  /** 提示音静音。注意它与 prefers-reduced-motion 解耦（M1 复核 §3.4）：
+   *  只关动画的用户不该连提示音一起丢掉，静音只由这一位决定。 */
+  muted: boolean
+  alwaysOnTop: boolean
+  openAtLogin: boolean
+}
+
+export const DEFAULT_PREFS: Prefs = { muted: false, alwaysOnTop: false, openAtLogin: true }
+
+export function readPrefs(file = configFile()): Prefs {
+  const cfg = readConfig(file)
+  return {
+    muted: cfg.muted ?? DEFAULT_PREFS.muted,
+    alwaysOnTop: cfg.alwaysOnTop ?? DEFAULT_PREFS.alwaysOnTop,
+    openAtLogin: cfg.openAtLogin ?? DEFAULT_PREFS.openAtLogin
+  }
+}
+
+export function writePref<K extends keyof Prefs>(
+  key: K, value: Prefs[K], file = configFile()
+): boolean {
+  return writeConfig({ [key]: value } as Config, file)
 }

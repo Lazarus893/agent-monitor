@@ -1,0 +1,101 @@
+/**
+ * 连接窗口的样式。独立于 app.css —— 那一份是 480×270 画布（zoom: 2）的版面，
+ * 这里是一个 1:1 的系统小窗，两套尺度不能混。
+ *
+ * 颜色一律用 design/tokens.css 的变量（由 connect.ts 直接 import 那份本体）。
+ * **不在这里复制任何 token 值**：src/ 下只要出现第二份定义，两份迟早分家
+ * （tests/tokens-source.test.ts 就是钉这一条的）。
+ */
+
+html { color-scheme: dark; }
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--ink);
+  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+.box {
+  padding: 14px 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100vh;
+}
+
+.lede {
+  margin: 0;
+  color: var(--mute);
+  font-size: 12px;
+}
+
+input {
+  appearance: none;
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm);
+  background: var(--surface-elevated);
+  color: var(--ink);
+  font: 13px/1.3 ui-monospace, SFMono-Regular, "SF Mono", monospace;
+  user-select: text;
+}
+
+input:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+  border-color: transparent;
+}
+
+.msg {
+  margin: 0;
+  min-height: 15px;
+  font-size: 12px;
+  color: var(--mute);
+}
+
+.msg[data-tone="error"] { color: var(--danger); }
+.msg[data-tone="ok"] { color: var(--ok); }
+
+.row {
+  margin-top: auto;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+button {
+  appearance: none;
+  min-width: 68px;
+  padding: 5px 12px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm);
+  background: var(--surface-elevated);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+button:hover { border-color: var(--mute); }
+button:active { background: var(--surface); }
+
+button:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+
+button.primary {
+  background: var(--ink);
+  color: var(--surface-elevated);
+  border-color: var(--ink);
+}
+
+button.primary:hover { border-color: var(--charcoal); background: var(--charcoal); }
+
+button[disabled] { opacity: 0.5; }

@@ -13,7 +13,7 @@
 import type { QuotaWindow } from '../../../shared/types.js'
 import type { QuotaResult } from './types.js'
 import { codeFromStatus, codeFromText, isRecord, toIso, toInt } from './types.js'
-import { readKeychain } from './keychain.js'
+import { keychainTarget, readKeychain } from './keychain.js'
 
 export const QUOTA_URL = 'https://open.bigmodel.cn/api/monitor/usage/quota/limit'
 export const KEYCHAIN_SERVICE = 'agent-monitor'
@@ -98,7 +98,12 @@ const defaultFetchQuota = async (
 
 export function createZcodeCollector(deps: ZcodeDeps = {}) {
   const readKey = deps.readKey
-    ?? ((signal: AbortSignal) => readKeychain(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, signal))
+    // keychainTarget：验收时用 MONITOR_KEYCHAIN_SERVICE 指到一个临时项，
+    // 「托盘保存 → collector 读回」这条往返才能在不碰真实 Key 的前提下验证
+    ?? ((signal: AbortSignal) => {
+      const t = keychainTarget(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
+      return readKeychain(t.service, t.account, signal)
+    })
   const fetchQuota = deps.fetchQuota ?? defaultFetchQuota
 
   return async function collectZcode(signal: AbortSignal): Promise<QuotaResult> {

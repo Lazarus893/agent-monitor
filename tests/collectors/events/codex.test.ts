@@ -4,11 +4,13 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { mkdtempSync, appendFileSync, utimesSync, writeFileSync, readFileSync } from 'node:fs'
+import {
+  mkdirSync, mkdtempSync, appendFileSync, utimesSync, writeFileSync, readFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  CodexEvents, attentionTypes, basenameSession, listRollouts, newSession, parseLine
+  CodexEvents, attentionTypes, basenameSession, listRollouts, newSession, parseLine, recentDayDirs
 } from '../../../src/main/collectors/events/codex.js'
 import type { EventInput, EventSink } from '../../../src/main/collectors/events/types.js'
 import type { AgentId, AgentStatus } from '../../../src/shared/types.js'
@@ -196,5 +198,124 @@ describe('增量读取', () => {
     await c.start()
     c.stop()
     expect(sk.events).toEqual([])
+  })
+})
+
+/* ==========================================================================
+   M4 · 发现新文件时只下钻最近两天的日期目录（M3 复核 §5）。
+   本机 ~/.codex/sessions 是 1624 个文件 / 391 MB，每 3 s 全量 readdir + 逐个 stat
+   热态约 21 ms —— 持续占掉 0.7% 的一个核，而且随时间单调变差。
+   ========================================================================== */
+
+describe('recentDayDirs', () => {
+  const at = (iso: string): number => new Date(iso).getTime()
+
+  it('按本地日期给出今天与昨天（codex 就是按本地日期建目录的）', () => {
+    // 用中午的时刻，避开时区把日期推过界
+    expect(recentDayDirs('/s', at('2026-09-14T12:00:00'), 2))
+      .toEqual(['/s/2026/09/14', '/s/2026/09/13'])
+  })
+
+  it('跨月、跨年都退得回去', () => {
+    expect(recentDayDirs('/s', at('2026-03-01T12:00:00'), 2)).toEqual(['/s/2026/03/01', '/s/2026/02/28'])
+    expect(recentDayDirs('/s', at('2026-01-01T12:00:00'), 2)).toEqual(['/s/2026/01/01', '/s/2025/12/31'])
+  })
+
+  it('月和日都补零', () => {
+    expect(recentDayDirs('/s', at('2026-09-05T12:00:00'), 1)).toEqual(['/s/2026/09/05'])
+  })
+})
+
+describe('listRollouts 的 roots 参数', () => {
+  it('给了 roots 就只走那几个子目录', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'codex-days-'))
+    const mk = (rel: string, name: string): string => {
+      mkdirSync(join(dir, rel), { recursive: true })
+      const f = join(dir, rel, name)
+      writeFileSync(f, '')
+      return f
+    }
+    const today = mk('2026/09/14', 'rollout-2026-09-14T10-00-00-01a08ac2-a8b0-7e01-8a3a-7b7390a4dd76.jsonl')
+    const old = mk('2025/01/02', 'rollout-2025-01-02T10-00-00-01a08ac2-a8b0-7e01-8a3a-7b7390a4dd99.jsonl')
+
+    // 不给 roots：整棵都走（启动那一轮就是这样，老文件要在那时进表记 offset）
+    expect((await listRollouts(dir)).sort()).toEqual([old, today].sort())
+    // 给了 roots：只有今天那一个
+    expect(await listRollouts(dir, [join(dir, '2026/09/14')])).toEqual([today])
+    // roots 指向不存在的目录：空表，不抛
+    expect(await listRollouts(dir, [join(dir, '2099/01/01')])).toEqual([])
+  })
+
+  it('启动后不再全量扫，但已经认识的老文件照样每轮读增量（resume 不会漏）', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'codex-resume-'))
+    const day = join(dir, '2025', '01', '02')
+    mkdirSync(day, { recursive: true })
+    const file = join(day, 'rollout-2025-01-02T10-00-00-01a08ac2-a8b0-7e01-8a3a-7b7390a4dd76.jsonl')
+    const src = lines('codex-rollout.jsonl')
+    writeFileSync(file, src.join('\n') + '\n')
+    // 推到 48 h 前：启动那一轮会 markSkipped —— 但**必须进表**
+    const old = Date.now() / 1000 - 48 * 3600
+    utimesSync(file, old, old)
+
+    const sk = sink()
+    const c = new CodexEvents(sk, dir)
+    await c.start()
+    expect(sk.events).toHaveLength(0)   // 老文件一行都不解析
+
+    // resume：往这个「不在最近两天目录里」的老文件后面追一条
+    appendFileSync(file, src[src.length - 1]! + '\n')
+    await c.tick()
+    c.stop()
+    // 它不在今天的目录里，靠的是「已经在 files 表里」这条路被读到
+    expect(sk.events.filter(e => e.kind === 'completed')).toHaveLength(1)
+  })
+})
+
+describe('浅扫 / 深扫', () => {
+  /** 造一个 <dir>/<y>/<m>/<d>/rollout-….jsonl */
+  const put = (dir: string, rel: string, suffix: string, body: string): string => {
+    mkdirSync(join(dir, rel), { recursive: true })
+    const f = join(dir, rel, `rollout-2026-09-14T10-00-00-01a08ac2-a8b0-7e01-8a3a-7b7390a4d${suffix}.jsonl`)
+    writeFileSync(f, body)
+    return f
+  }
+
+  it('浅扫不碰启动时跳过的老文件，深扫才捡起来', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'codex-sweep-'))
+    const src = lines('codex-rollout.jsonl')
+    // 2025 年的老目录 —— 不在「今天 / 昨天」里
+    const old = put(dir, '2025/01/02', 'd76', src.slice(0, -1).join('\n') + '\n')
+    const t = Date.now() / 1000 - 48 * 3600
+    utimesSync(old, t, t)
+
+    const sk = sink()
+    const c = new CodexEvents(sk, dir)
+    await c.start()                       // 启动是全量：old 进表并记 offset
+    expect(sk.events).toHaveLength(0)
+
+    appendFileSync(old, src[src.length - 1]! + '\n')
+    await c.tick(false)                   // 浅扫：skipped 的老文件不在名单里
+    expect(sk.events).toHaveLength(0)
+
+    await c.tick()                        // 深扫：捡起来
+    c.stop()
+    expect(sk.events.filter(e => e.kind === 'completed')).toHaveLength(1)
+  })
+
+  it('浅扫照样看得见今天目录里新冒出来的文件', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'codex-today-'))
+    mkdirSync(dir, { recursive: true })
+    const sk = sink()
+    const c = new CodexEvents(sk, dir)
+    await c.start()
+
+    const d = new Date()
+    const p2 = (n: number): string => String(n).padStart(2, '0')
+    const today = `${d.getFullYear()}/${p2(d.getMonth() + 1)}/${p2(d.getDate())}`
+    put(dir, today, 'd77', lines('codex-rollout.jsonl').join('\n') + '\n')
+
+    await c.tick(false)                   // 浅扫就该看见 —— 新文件只会出现在今天的目录里
+    c.stop()
+    expect(sk.events.filter(e => e.kind === 'completed').length).toBeGreaterThan(0)
   })
 })

@@ -11,6 +11,9 @@ export const CH = {
   dev: 'monitor:dev'
 } as const
 
+/* 「连接 ZCode」窗口的两条频道不在这里 —— 见 shared/connect-ipc.ts 文件头，
+   两个沙箱 preload 不能共享任何模块，否则 rollup 会抽出 chunks/。 */
+
 export type DevMessage =
   | { type: 'setState'; name: string }
   | { type: 'forceError'; agent: string; code: string | null }

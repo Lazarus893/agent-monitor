@@ -127,6 +127,18 @@
      across three semantic tiers, so shape does: the notch measures 18.24:1 on
      ink, 13.39 on charcoal, 12.68 on warn, 6.81 on danger and 3.75 on the bare
      track — constant and tier-independent. Semantic red/yellow are untouched. */
+  /* REVISION 7（用户 2026-09-14 晚追加）：进度条填充改用各 agent 的身份色。
+     这条明确覆盖了 §7 原来「身份色只用于徽记 / 圆点这类小面积」的自我约束——
+     用户要的是「一眼看出这条是谁的」，而身份色是分类色，不计入 accent。
+     引用身份色而不复制 hex：ZCode 的蓝是在 OKLCH 里校准过的，抄一份就会漂。
+     Claude 橙、ZCode 蓝叠在 --ash 轨道上只有约 1.7:1，但边界不靠色差——
+     它由填充末端那道 2px --canvas 缺口承担（R3-01/R4-02 的机制，对各档填充
+     实测 6.42–13.39:1）。这正是当初把边界从颜色换成形状的回报：
+     现在换填充色不需要再动任何对比度补偿。 */
+  --quota-fill-codex:  var(--id-codex);
+  --quota-fill-claude: var(--id-claude);
+  --quota-fill-zcode:  var(--id-zcode);
+
   --quota-notch:       var(--canvas);
   --quota-notch-w:     2px;
   --quota-warn-at:     80;
@@ -235,7 +247,7 @@
   --manual-hold: 120s;
 
   /* 横向压缩补偿（v2 第 5 条）。副屏在 960×540 模式下被面板缩放器横向压了 15.6%，
-     用户用 design/aspect-test.html 的圆校准出系数 1.19。画布逻辑宽收窄到
+     用户用 design/tools/aspect-test.html 的圆校准出系数 1.19。画布逻辑宽收窄到
      round(480 / 1.19) = 403px，再由 stage 的非等比 transform 拉回 960 物理宽。
      960×640 原生模式下不需要补偿，置 1.0。
 

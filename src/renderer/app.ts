@@ -37,10 +37,20 @@ declare global {
 
 /* ---------- 常量 ---------- */
 
-const AGENTS: Record<AgentId, { name: string; tag: string; color: string }> = {
-  codex: { name: 'Codex', tag: 'Codex', color: 'var(--id-codex)' },
-  claude: { name: 'Claude Code', tag: 'Claude', color: 'var(--id-claude)' },
-  zcode: { name: 'ZCode', tag: 'ZCode', color: 'var(--id-zcode)' }
+/**
+ * `fill` 是额度条的填充色（原型 REVISION 7）：**每家用自己的身份色**，
+ * 不再是统一的 --charcoal，阈值也不再把整条改成黄 / 红。
+ * 理由（designer 2026-09-14）：重绘整条会和身份色打架，而且恰好在最需要看清
+ * 「这条是谁的」的时候把身份抹掉。阈值信号改由百分比数字变色 + 数字旁的
+ * .b-alert 图标承担，颜色之外仍有非颜色信号（WCAG 1.4.1）。
+ *
+ * 这里存的是 **token 名**不是色值：ZCode 的蓝是对着 Claude 的橙做过 OKLCH 校准的，
+ * 抄一份 hex 过来，任何一边重新调色时就会分家。
+ */
+const AGENTS: Record<AgentId, { name: string; tag: string; color: string; fill: string }> = {
+  codex: { name: 'Codex', tag: 'Codex', color: 'var(--id-codex)', fill: 'var(--quota-fill-codex)' },
+  claude: { name: 'Claude Code', tag: 'Claude', color: 'var(--id-claude)', fill: 'var(--quota-fill-claude)' },
+  zcode: { name: 'ZCode', tag: 'ZCode', color: 'var(--id-zcode)', fill: 'var(--quota-fill-zcode)' }
 }
 
 const WIN5H = 5 * 3600 * 1000
@@ -295,9 +305,19 @@ let scene: Scene = {
 let cfg: PagerConfig = DEFAULT_CONFIG
 let pg: PagerState = create(Date.now())
 let rm = window.matchMedia('(prefers-reduced-motion:reduce)').matches
+/**
+ * 提示音静音 —— 托盘的开关，主进程经 `{type:'mute'}` 推来（首帧与每次重载都会补推）。
+ *
+ * M1 复核 §3.4：原型把静音绑在 `prefers-reduced-motion` 上，于是一个只想关动画的用户
+ * 会连「有人在等你」那一声一起丢掉。两件事没有关系，M4 把它们拆开：
+ * 动画看 `rm`，声音只看这一位。
+ */
+let muted = false
 let lastPage: Page | null = null
 let knownIds = new Set<string>()
 let firstState = true
+/** 上一帧的时间原点 —— 变了才重新对时，见 onState */
+let lastGeneratedAt = ''
 /** 上一帧的场景名 —— 调试栏切场景时整份 events 被换掉，那不算「新事件」 */
 let state0: SceneName | null = null
 /** ack 之前焦点在哪一行：重渲染会销毁行元素，之后要把焦点还回去 */
@@ -356,7 +376,7 @@ function renderPageA(): void {
             ? ` data-stale="${esc(t.stale.since)}" data-stale-short="1"`
             : ` data-word="${lv}|${t.status}"`}></span></div>`
     }
-    return `<section class="tile" data-status="${t.status}" data-level="${lv}" style="--idc:${a.color}" ` +
+    return `<section class="tile" data-status="${t.status}" data-level="${lv}" style="--idc:${a.color};--fill:${a.fill}" ` +
       `aria-label="${esc(a.name)} 额度">${head}${body}</section>`
   }).join('')
 }
@@ -389,6 +409,7 @@ function renderPageB(): void {
         <span class="b-verdict"${t.stale
           ? ` data-tone="mute" data-stale="${esc(t.stale.since)}"`
           : ` data-model="${esc(t.topModel ?? '')}" data-status="${t.status}"`}></span>
+        ${lv === 'ok' ? '' : `<span class="b-alert" aria-label="${lv === 'danger' ? '余量吃紧' : '余量偏紧'}">${svg('alert', 14)}</span>`}
         <span class="b-pc mono">${w5.usedPercent}%</span>
         ${w7 ? `<span class="b-sec mono">${esc(w7.label)} ${w7.usedPercent}%</span>` : ''}
         <span class="b-cd mono" data-cd="${esc(w5.resetsAt)}"></span></div>
@@ -398,7 +419,7 @@ function renderPageB(): void {
             <span class="caret" data-caret="${start}"></span></div>
           <span class="resettick"></span></div>`
     }
-    return `<section class="tile" data-status="${t.status}" data-level="${lv}" style="--idc:${a.color}" ` +
+    return `<section class="tile" data-status="${t.status}" data-level="${lv}" style="--idc:${a.color};--fill:${a.fill}" ` +
       `aria-label="${esc(a.name)} 额度">${inner}</section>`
   }).join('')
 }
@@ -503,7 +524,20 @@ const DAY_LABEL = ['一', '', '三', '', '五', '', '日']
 
 function renderPageD(): void {
   const st = scene.usageState
-  if (st !== 'ok' && st !== 'edge') {
+  /* `!usage?.days.length` 这一半是 M4 补的（不在 M4 简报上，但 M4 的日志把它照出来了）：
+     `edge` 场景在 dataStateFor 里是**无条件**返回 'edge' 的，而 fixtures 的 edge 帧
+     根本没有 usage 字段。原来这里紧接着写 `scene.usage!`，于是调试栏切到 edge、
+     以及 selftest 跑七态截图时，D 页每次都抛
+     `Cannot read properties of undefined (reading 'days')`——
+     整个 onState 那一轮渲染就此中断。E 页同位置写的是 `scene.news?.items ?? []`，
+     两页本该一致。
+
+     守卫本身不用动：`st !== 'ok' && st !== 'edge'` 就是 DataState 里的
+     {loading, empty, error}，与原型 2026-09-14 独立修好的
+     `st === "loading" || st === "empty" || st === "error"` 同义 —— edge 不再
+     被当成空态。缺的只是「拿到 edge 却没有 usage」这一格的兜底。 */
+  const usage = scene.usage
+  if ((st !== 'ok' && st !== 'edge') || !usage?.days.length) {
     el.pdHeat.innerHTML = st === 'loading'
       ? `<div class="feed-skel"><i style="height:20px"></i><i style="height:104px"></i>
          <span class="loading-label" role="status">读取中</span></div>`
@@ -513,7 +547,6 @@ function renderPageD(): void {
          <p>${st === 'error' ? 'codexbar cost 调用超时，30 分钟后重试' : '跑满一天后这里会出现第一格'}</p></div>`
     return
   }
-  const usage = scene.usage!
   const days = usage.days
   const maxI = days.reduce((m, d) => Math.max(m, d.intensity || 0), 0)
   /* 列数由画布宽度决定：每列 cell+2px，减去星期标签列与间隙。
@@ -790,7 +823,7 @@ function updateMeter(): void {
 
 let ac: AudioContext | null = null
 function chime(): void {
-  if (rm) return
+  if (muted) return
   try {
     ac = ac ?? new AudioContext()
     if (ac.state === 'suspended') void ac.resume()
@@ -854,11 +887,19 @@ function onState(next: MonitorState): void {
   applyCanvas(next.canvas, next.panelX)
 
   const isFirst = firstState
-  if (firstState) {
+  /* 时间原点跟着 `generatedAt` 走，而不是只认首帧。
+     只认首帧的后果（M4 实测）：selftest 先跑真实采集、之后再切 fixtures 场景，
+     原点仍停在真实的「现在」，于是 fixtures 里那些早已过去的 resetsAt 全被夹成
+     「0m 后重置」—— 落盘的七态截图整批是错的。
+     判据是 `generatedAt` **变了**才重置，不是每帧都重置：live 模式下
+     setPanelX / setCanvas 这类 emit 会原样带着上一次采集的 generatedAt，
+     每帧都重置会让屏上的钟往回跳到上次采集的时刻。 */
+  if (firstState || next.generatedAt !== lastGeneratedAt) {
     now0 = new Date(next.generatedAt).getTime()
     boot = Date.now()
     firstState = false
   }
+  lastGeneratedAt = next.generatedAt
 
   const nowMs = Date.now()
   const hasAttn = !!attnItem()
@@ -1040,12 +1081,12 @@ if (DEBUG) {
     document.querySelectorAll<HTMLElement>('#segState button').forEach(x => {
       x.setAttribute('aria-pressed', String(x.dataset.s === b.dataset.s))
     })
-    window.monitor.dev.setState(b.dataset.s as SceneName)
+    window.monitor.dev?.setState(b.dataset.s as SceneName)
   })
-  $('btnPush').addEventListener('click', () => window.monitor.dev.simulateEvent())
+  $('btnPush').addEventListener('click', () => window.monitor.dev?.simulateEvent())
   $('btnAttn').addEventListener('click', () => {
-    if (attnItem()) window.monitor.dev.clearAttention()
-    else window.monitor.dev.simulateAttention()
+    if (attnItem()) window.monitor.dev?.clearAttention()
+    else window.monitor.dev?.simulateAttention()
   })
 }
 
@@ -1064,6 +1105,9 @@ window.monitor.onCommand(cmd => {
     return
   } else if (cmd.type === 'calibrate') {
     toggleCalibration()
+    return
+  } else if (cmd.type === 'mute') {
+    muted = cmd.value
     return
   }
   applyPage()

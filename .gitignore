@@ -6,3 +6,4 @@ out/
 .claude/
 *.tsbuildinfo
 test-results/
+design/shots/selftest/
