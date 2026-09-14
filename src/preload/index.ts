@@ -5,7 +5,9 @@
 
 import { contextBridge, ipcRenderer } from 'electron'
 import { CH } from '../shared/ipc.js'
-import type { MonitorApi, MonitorCommand, MonitorState, Page, SceneName } from '../shared/types.js'
+import type {
+  AgentId, MonitorApi, MonitorCommand, MonitorState, NoticeCode, Page, SceneName
+} from '../shared/types.js'
 
 const api: MonitorApi = {
   subscribe(cb) {
@@ -28,8 +30,11 @@ const api: MonitorApi = {
     ipcRenderer.send(CH.rendered, token)
   },
   dev: {
-    setState(name: SceneName) {
+    setState(name: SceneName | 'live') {
       ipcRenderer.send(CH.dev, { type: 'setState', name })
+    },
+    forceError(agent: AgentId, code: NoticeCode | null) {
+      ipcRenderer.send(CH.dev, { type: 'forceError', agent, code })
     },
     simulateEvent() {
       ipcRenderer.send(CH.dev, { type: 'simulateEvent' })

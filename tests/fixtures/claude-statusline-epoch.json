@@ -1,0 +1,7 @@
+{
+ "_note": "同一份 statusline JSON 的另一种 resets_at 编码：epoch 秒。两种都要解析得出同一个时刻。",
+ "rate_limits": {
+  "five_hour": { "used_percentage": 82, "resets_at": 1789376400 },
+  "seven_day": { "used_percentage": 31, "resets_at": 1789801200 }
+ }
+}

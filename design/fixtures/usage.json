@@ -1,0 +1,908 @@
+{
+ "generatedAt": "2026-09-14T19:35:19+08:00",
+ "sources": {
+  "codex": "codexbar cost --provider codex (daily totalTokens)",
+  "claude": "codexbar cost --provider claude (daily totalTokens)",
+  "zcode": "~/.zcode/cli/log/zcode-*.jsonl model.request.completed count"
+ },
+ "note": "intensity = mean of per-agent normalized usage (0–1); units differ per agent",
+ "weeks": 8,
+ "days": [
+  {
+   "date": "2026-07-21",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-07-22",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-07-23",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-07-24",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-07-25",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-07-26",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-07-27",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-07-28",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-07-29",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-07-30",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-07-31",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-01",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-02",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-03",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-04",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-05",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-06",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-07",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-08",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-09",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-10",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-11",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-12",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-13",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-14",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-15",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-16",
+   "byAgent": {
+    "codex": {
+     "tokens": 15956197
+    },
+    "claude": {
+     "tokens": 366682825
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.502,
+   "total": 382639022
+  },
+  {
+   "date": "2026-08-17",
+   "byAgent": {
+    "codex": {
+     "tokens": 6360528
+    },
+    "claude": {
+     "tokens": 700012382
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.455,
+   "total": 706372910
+  },
+  {
+   "date": "2026-08-18",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 581110976
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.267,
+   "total": 581110976
+  },
+  {
+   "date": "2026-08-19",
+   "byAgent": {
+    "codex": {
+     "tokens": 297239
+    },
+    "claude": {
+     "tokens": 201426337
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.099,
+   "total": 201723576
+  },
+  {
+   "date": "2026-08-20",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 54641410
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.025,
+   "total": 54641410
+  },
+  {
+   "date": "2026-08-21",
+   "byAgent": {
+    "codex": {
+     "tokens": 2097182
+    },
+    "claude": {
+     "tokens": 363231950
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.211,
+   "total": 365329132
+  },
+  {
+   "date": "2026-08-22",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-23",
+   "byAgent": {
+    "codex": {
+     "tokens": 5253417
+    },
+    "claude": {
+     "tokens": 283289469
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.24,
+   "total": 288542886
+  },
+  {
+   "date": "2026-08-24",
+   "byAgent": {
+    "codex": {
+     "tokens": 3325511
+    },
+    "claude": {
+     "tokens": 269427815
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.193,
+   "total": 272753326
+  },
+  {
+   "date": "2026-08-25",
+   "byAgent": {
+    "codex": {
+     "tokens": 2645527
+    },
+    "claude": {
+     "tokens": 219229163
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.156,
+   "total": 221874690
+  },
+  {
+   "date": "2026-08-26",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 724702245
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.333,
+   "total": 724702245
+  },
+  {
+   "date": "2026-08-27",
+   "byAgent": {
+    "codex": {
+     "tokens": 5165696
+    },
+    "claude": {
+     "tokens": 171602645
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.187,
+   "total": 176768341
+  },
+  {
+   "date": "2026-08-28",
+   "byAgent": {
+    "codex": {
+     "tokens": 76801
+    },
+    "claude": {
+     "tokens": 194969966
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.091,
+   "total": 195046767
+  },
+  {
+   "date": "2026-08-29",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-30",
+   "byAgent": {
+    "codex": {
+     "tokens": 13714358
+    },
+    "claude": {
+     "tokens": 33802144
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.302,
+   "total": 47516502
+  },
+  {
+   "date": "2026-08-31",
+   "byAgent": {
+    "codex": {
+     "tokens": 378522
+    },
+    "claude": {
+     "tokens": 47980750
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.03,
+   "total": 48359272
+  },
+  {
+   "date": "2026-09-01",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 181663084
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.084,
+   "total": 181663084
+  },
+  {
+   "date": "2026-09-02",
+   "byAgent": {
+    "codex": {
+     "tokens": 3562476
+    },
+    "claude": {
+     "tokens": 292109710
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.209,
+   "total": 295672186
+  },
+  {
+   "date": "2026-09-03",
+   "byAgent": {
+    "codex": {
+     "tokens": 5248468
+    },
+    "claude": {
+     "tokens": 400512723
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.294,
+   "total": 405761191
+  },
+  {
+   "date": "2026-09-04",
+   "byAgent": {
+    "codex": {
+     "tokens": 2910310
+    },
+    "claude": {
+     "tokens": 11454767
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.066,
+   "total": 14365077
+  },
+  {
+   "date": "2026-09-05",
+   "byAgent": {
+    "codex": {
+     "tokens": 7541522
+    },
+    "claude": {
+     "tokens": 12584538
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.163,
+   "total": 20126060
+  },
+  {
+   "date": "2026-09-06",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 6709081
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.003,
+   "total": 6709081
+  },
+  {
+   "date": "2026-09-07",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 129589505
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.06,
+   "total": 129589505
+  },
+  {
+   "date": "2026-09-08",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 247098584
+    },
+    "zcode": {
+     "requests": 101
+    }
+   },
+   "intensity": 0.141,
+   "total": 247098584
+  },
+  {
+   "date": "2026-09-09",
+   "byAgent": {
+    "codex": {
+     "tokens": 1107580
+    },
+    "claude": {
+     "tokens": 492089555
+    },
+    "zcode": {
+     "requests": 1216
+    }
+   },
+   "intensity": 0.583,
+   "total": 493197135
+  },
+  {
+   "date": "2026-09-10",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 71915158
+    },
+    "zcode": {
+     "requests": 746
+    }
+   },
+   "intensity": 0.238,
+   "total": 71915158
+  },
+  {
+   "date": "2026-09-11",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 203090115
+    },
+    "zcode": {
+     "requests": 88
+    }
+   },
+   "intensity": 0.118,
+   "total": 203090115
+  },
+  {
+   "date": "2026-09-12",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-09-13",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-09-14",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 227882759
+    },
+    "zcode": {
+     "requests": 233
+    }
+   },
+   "intensity": 0.169,
+   "total": 227882759
+  }
+ ]
+}

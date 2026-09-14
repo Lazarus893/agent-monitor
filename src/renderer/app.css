@@ -122,7 +122,8 @@ body{margin:0;background:var(--canvas);overflow:hidden;
 .msg-head svg{flex:none;color:var(--mute)}
 .msg[data-tone="error"] .msg-head svg{color:var(--danger)}
 .msg p{margin:0;font-size:var(--fs-min);line-height:1.35;color:var(--mute);
-  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;
+  overflow-wrap:anywhere}
 .skel{display:flex;flex-direction:column;gap:var(--sp-sm);flex:1;justify-content:center}
 .skel i{display:block;background:var(--stone);border-radius:var(--r-xs)}
 .loading-label{font-size:var(--fs-min);letter-spacing:var(--tr-small);color:var(--mute);font-weight:var(--w-emph)}
@@ -172,6 +173,7 @@ body{margin:0;background:var(--canvas);overflow:hidden;
 .page-b .b-name span.t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .page-b .b-verdict{font-size:var(--fs-min);color:var(--mute);flex:1;min-width:0;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.2}
+.page-b .b-verdict[data-tone="mute"]{color:var(--mute)}
 .page-b .b-verdict[data-tone="over"]{color:var(--quota-warn)}
 .page-b .b-verdict[data-tone="error"]{color:var(--danger)}
 .page-b .b-verdict[data-tone="attn"]{color:var(--ink);font-weight:var(--w-read)}

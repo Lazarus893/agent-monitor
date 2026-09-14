@@ -1,7 +1,7 @@
 /**
  * 主进程与渲染层共用的数据模型。
- * 主干来自 PLAN.md §2.3；M1 为了把 M0 原型的七态完整搬过来，加了三处最小扩展，
- * 每处都在下面注明理由，M2 接真实采集时应保留而不是回退。
+ * 主干来自 PLAN.md §2.3；M1 为了把 M0 原型的七态完整搬过来加了三处最小扩展，
+ * M2 接真实采集时又加了第四处（stale / plan）。每处都在下面注明理由。
  */
 
 export type AgentId = 'codex' | 'claude' | 'zcode'
@@ -29,6 +29,7 @@ export type NoticeCode =
   | 'first_sample'     // 还没采到第一轮（empty）
   | 'no_statusline'    // Claude statusline 还没写入（empty）
   | 'missing_key'      // ZCode 未连接（empty）
+  | 'missing_tool'     // PATH 与 /opt/homebrew/bin 里都没有 codexbar（empty）
   | 'unauthorized'     // 额度接口 401（error）
   | 'rate_limited'     // 429（error）
   | 'network'          // 网络不可达（error）
@@ -41,8 +42,18 @@ export type AgentState = {
   id: AgentId
   status: AgentStatus
   windows: QuotaWindow[]
+  /** 最后一次「窗口数字是真的」的时刻 —— 采集成功时刷新，出错时停住不动 */
   updatedAt: string
   notice?: Notice
+  /**
+   * 扩展 4（M2）· 采集出错但上一轮的数字还留着。
+   * 这时 windows 仍然是真数据，只是旧了：渲染层照常画数字，并在倒计时旁标
+   * 「数据 N 分钟前」（N 由 updatedAt 算）。没有这一位的话，一次网络抖动
+   * 就会把三块瓦片清成错误文案，而屏上本来还有可用的信息。
+   */
+  stale?: boolean
+  /** 订阅档位：codex 的 loginMethod、智谱的 level。随状态推到渲染层，当前没有任何一页画它。 */
+  plan?: string
 }
 
 /**
@@ -104,7 +115,10 @@ export type MonitorCommand =
   | { type: 'showPage'; page: Page; token: number }
 
 export type DevApi = {
-  setState(name: SceneName): void
+  /** 场景名 = 喂 fixtures；'live' = 切回真实采集 */
+  setState(name: SceneName | 'live'): void
+  /** 把某个 agent 的下一轮采集强制成指定失败码；code 为 null 时解除（M2 断网演练用） */
+  forceError(agent: AgentId, code: NoticeCode | null): void
   simulateEvent(): void
   simulateAttention(): void
   clearAttention(): void

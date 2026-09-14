@@ -50,17 +50,46 @@ const FEED_TITLE: Partial<Record<SceneName, string>> = {
   attention: '需要你', running: '进行中', loading: '事件', empty: '事件', error: '事件'
 }
 
-/** notice code → 画布上的那块 msg。文案取自原型，逐字不动。 */
-const NOTICE_COPY: Record<NoticeCode, { icon: IconName; title: string; why: string }> = {
+type Copy = { icon: IconName; title: string; why: string }
+
+/**
+ * notice code → 画布上的那块 msg。口径沿用 M0（design/review/00-designer-notes.md）：
+ * 标题一句、原因与下一步压成一句。这里是与 agent 无关的默认值。
+ */
+const NOTICE_COPY: Record<NoticeCode, Copy> = {
   first_sample: { icon: 'clock', title: '等待首轮采样', why: '约 60 秒后自动出现' },
-  no_statusline: { icon: 'inbox', title: 'statusline 未写入', why: '跑一次 claude 会话即可补上' },
-  missing_key: { icon: 'key', title: '未连接', why: '还没有智谱 API Key' },
-  unauthorized: { icon: 'lock', title: '额度接口 401', why: '登录令牌过期，跑 codex login 重新授权' },
-  rate_limited: { icon: 'hour', title: '接口限流 429', why: '已退避重试，期间读 statusline 缓存' },
+  no_statusline: { icon: 'inbox', title: '还没接入 statusline', why: '跑 install-claude-statusline 接入' },
+  missing_key: { icon: 'key', title: '未连接', why: '还没有这一家的 API Key' },
+  missing_tool: { icon: 'inbox', title: '找不到采集命令', why: '装好之后自动恢复' },
+  unauthorized: { icon: 'lock', title: '额度接口 401', why: '登录令牌过期，需要重新授权' },
+  rate_limited: { icon: 'hour', title: '接口限流 429', why: '已退避重试，稍后自动恢复' },
   network: { icon: 'wifi', title: '网络不可达', why: '恢复联网后自动重连，不用操作' },
   feed_empty: { icon: 'inbox', title: '今天还没有完成的任务', why: '有任务跑完会自动排到这里' },
   feed_error: { icon: 'radio', title: '事件采集中断', why: '30 秒后自动重新挂载，期间事件会补齐' }
 }
+
+/**
+ * 同一个失败码，三家的下一步动作完全不同 —— 按 (agent, code) 覆盖默认文案。
+ * 复核 P1-②：以前 401 无论落在谁身上都写「跑 codex login」，
+ * Claude 那块瓦片上就印着这句（design/shots/m2/live-page-a.png）。
+ */
+const AGENT_COPY: Partial<Record<AgentId, Partial<Record<NoticeCode, Partial<Copy>>>>> = {
+  codex: {
+    unauthorized: { why: '登录令牌过期，跑 codex login 重新授权' },
+    missing_tool: { title: '找不到 codexbar', why: '装好 codexbar 后自动恢复' }
+  },
+  claude: {
+    unauthorized: { why: '登录令牌过期，跑 claude login 重新授权' },
+    rate_limited: { why: '已退避重试，期间读 statusline 缓存' }
+  },
+  zcode: {
+    unauthorized: { why: 'Key 失效，换一枚智谱 Key' },
+    missing_key: { why: '还没有智谱 API Key' }
+  }
+}
+
+const copyFor = (code: NoticeCode, agent?: AgentId): Copy =>
+  ({ ...NOTICE_COPY[code], ...(agent ? AGENT_COPY[agent]?.[code] : undefined) })
 
 type IconName = keyof typeof ICON
 const ICON = {
@@ -104,13 +133,26 @@ const whenFmt = (iso: string, ref: number): string => {
   if (diff < 3600000) return `${Math.floor(diff / 60000)} 分钟前`
   return sameDay(d, new Date(ref)) ? hhmm(d) : `${d.getMonth() + 1}/${d.getDate()} ${hhmm(d)}`
 }
+/**
+ * stale 标记：数字还是上一轮的真数据，只是旧了。岁数由 AgentState.updatedAt 算。
+ * A 页的瓦片实测只有 141px 宽，那一格装不下「数据 59 分钟前」（selftest 逐字量过），
+ * 所以 A 页用短形 —— 那里的图标已经在说「连不上」；B 页的判语位宽敞，用完整那句。
+ */
+const staleFmt = (iso: string, ref: number, short = false): string => {
+  const m = Math.floor(Math.max(0, ref - new Date(iso).getTime()) / 60000)
+  const h = Math.floor(m / 60)
+  const body = m < 1 ? '1 分钟内'
+    : m < 60 ? `${m} 分钟前`
+      : h < 24 ? `${h} 小时前` : `${Math.floor(h / 24)} 天前`
+  return short ? body : `数据 ${body}`
+}
 const level = (p: number): 'ok' | 'warn' | 'danger' => (p >= 95 ? 'danger' : p >= 80 ? 'warn' : 'ok')
 const esc = (s: unknown): string =>
   String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string))
 
 /* ---------- 视图模型 ---------- */
 
-type Msg = { tone: Notice['tone'] } & (typeof NOTICE_COPY)[NoticeCode]
+type Msg = { tone: Notice['tone'] } & Copy
 
 /**
  * Tile 做成判别联合，而不是 `phase: string` + `windows[0]!`。
@@ -123,6 +165,8 @@ type OkTile = {
   phase: 'ok'
   status: AgentState['status']
   windows: [QuotaWindow, ...QuotaWindow[]]
+  /** 采集出错但旧数字还在：照常画数字，把「后重置 / 速度判语」那一格换成「数据 N 分钟前」 */
+  stale?: { since: string; icon: IconName }
 }
 type LoadingTile = { agent: AgentId; phase: 'loading'; status: AgentState['status'] }
 type NoticeTile = { agent: AgentId; phase: 'msg'; status: AgentState['status']; msg: Msg }
@@ -131,21 +175,31 @@ type Tile = OkTile | LoadingTile | NoticeTile
 type Feed = { phase: 'ok' | 'loading' | 'msg'; items: AgentEvent[]; msg?: Msg }
 type Scene = { tiles: Tile[]; feed: Feed }
 
-const toMsg = (n: Notice): Msg => ({ tone: n.tone, ...NOTICE_COPY[n.code] })
+const toMsg = (n: Notice, agent?: AgentId): Msg => ({ tone: n.tone, ...copyFor(n.code, agent) })
 
 function toTile(a: AgentState, loading: boolean): Tile {
   if (loading) return { agent: a.id, phase: 'loading', status: a.status }
   const [w5, ...rest] = a.windows
   // 没有 notice 也没有窗口 —— 有响应但还没数据，按「等待首轮采样」的空态画，别当成 ok
-  if (a.notice || !w5) {
+  // 有 notice 但旧数字还在（stale）—— 数字仍然是这块屏上最有用的信息，照画，
+  // 只把那一格判语换成数据的岁数；一次网络抖动不该把三块瓦片清成文案。
+  if (!w5 || (a.notice && !a.stale)) {
     return {
       agent: a.id,
       phase: 'msg',
       status: a.status,
-      msg: toMsg(a.notice ?? { tone: 'empty', code: 'first_sample' })
+      msg: toMsg(a.notice ?? { tone: 'empty', code: 'first_sample' }, a.id)
     }
   }
-  return { agent: a.id, phase: 'ok', status: a.status, windows: [w5, ...rest] }
+  return {
+    agent: a.id,
+    phase: 'ok',
+    status: a.status,
+    windows: [w5, ...rest],
+    ...(a.stale && a.notice
+      ? { stale: { since: a.updatedAt, icon: copyFor(a.notice.code, a.id).icon } }
+      : {})
+  }
 }
 
 function toScene(s: MonitorState): Scene {
@@ -214,6 +268,7 @@ function readConfig(): PagerConfig {
 /* ---------- 渲染：A 页 ---------- */
 
 function footIcon(t: Tile, lv: string): IconName {
+  if (t.phase === 'ok' && t.stale) return t.stale.icon
   if (t.status === 'attention') return 'ret'
   if (lv !== 'ok') return 'alert'
   if (t.status === 'running') return 'dot'
@@ -242,7 +297,9 @@ function renderPageA(): void {
           <span class="num">${w5.usedPercent}</span><span class="unit">%</span></div></div>
         <div class="tile-foot" data-level="${lv}" data-status="${t.status}">${svg(footIcon(t, lv), 15)}<span
           class="cd mono" data-foot="${esc(w5.resetsAt)}" data-level="${lv}" data-status="${t.status}"></span><span
-          class="word" data-word="${lv}|${t.status}"></span></div>`
+          class="word"${t.stale
+            ? ` data-stale="${esc(t.stale.since)}" data-stale-short="1"`
+            : ` data-word="${lv}|${t.status}"`}></span></div>`
     }
     return `<section class="tile" data-status="${t.status}" data-level="${lv}" style="--idc:${a.color}" ` +
       `aria-label="${esc(a.name)} 额度">${head}${body}</section>`
@@ -255,7 +312,8 @@ function renderPageB(): void {
   el.pbBands.innerHTML = scene.tiles.map(t => {
     const a = AGENTS[t.agent]
     const lv = t.phase === 'ok' ? level(t.windows[0].usedPercent) : 'ok'
-    const nameCell = `<h2 class="b-name"><span class="iddot"${t.phase === 'ok' ? '' : ' data-off="1"'}></span>` +
+    const off = t.phase !== 'ok' || t.status === 'offline'
+    const nameCell = `<h2 class="b-name"><span class="iddot"${off ? ' data-off="1"' : ''}></span>` +
       `<span class="t">${esc(a.name)}</span></h2>`
     let inner: string
     if (t.phase === 'loading') {
@@ -270,7 +328,9 @@ function renderPageB(): void {
       const w5 = t.windows[0], w7 = t.windows[1]
       const start = new Date(w5.resetsAt).getTime() - WIN5H
       inner = `<div class="b-head">${nameCell}
-        <span class="b-verdict" data-verdict="${start}" data-used="${w5.usedPercent}" data-status="${t.status}"></span>
+        <span class="b-verdict"${t.stale
+          ? ` data-tone="mute" data-stale="${esc(t.stale.since)}"`
+          : ` data-verdict="${start}" data-used="${w5.usedPercent}" data-status="${t.status}"`}></span>
         <span class="b-pc mono">${w5.usedPercent}%</span>
         ${w7 ? `<span class="b-sec mono">${esc(w7.label)} ${w7.usedPercent}%</span>` : ''}
         <span class="b-cd mono" data-cd="${esc(w5.resetsAt)}"></span></div>
@@ -382,6 +442,9 @@ function tickTiles(): void {
   })
   document.querySelectorAll<HTMLElement>('[data-cd]').forEach(n => {
     n.textContent = countdown(n.dataset.cd!, t)
+  })
+  document.querySelectorAll<HTMLElement>('[data-stale]').forEach(n => {
+    n.textContent = staleFmt(n.dataset.stale!, t, n.dataset.staleShort === '1')
   })
   document.querySelectorAll<HTMLElement>('[data-caret]').forEach(n => {
     const pct = Math.max(0, Math.min(100, ((t - Number(n.dataset.caret)) / WIN5H) * 100))

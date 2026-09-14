@@ -1,0 +1,31 @@
+{
+ "generatedAt": "2026-09-14T19:35:19+08:00",
+ "source": "AIHOT /api/v1/items?mode=selected&window=24h&limit=5 (personal non-commercial use; attribution required)",
+ "attribution": "数据来源：AIHOT",
+ "items": [
+  {
+   "title": "小红书 AllSpark 开源 Search Agent 模型 Iris，35B 与 397B 版本同量级成绩领先",
+   "summary": "小红书 AllSpark 团队发布并开源 Search Agent 模型 Iris，权重和评测代码已公开，数据与训练配方将陆续公布。",
+   "source": "公众号：小红书技术（dots.llm）",
+   "url": null,
+   "at": "2026-09-14T09:59:00.000Z",
+   "reason": "原文给出了数据构造、SFT-RL 训练和统一评测的完整思路，读者可以据此理解 Search Agent 的训练难点与可迁移方法。"
+  },
+  {
+   "title": "Gary Marcus 评 Dario Amodei 的放慢 AI 发展提议：三份赞誉加两分怀疑",
+   "summary": "Gary Marcus 评析 Dario Amodei 倡导放慢 AI 发展并支持透明度的文章，Sam Altman 与 Elon Musk 迅速表示认同。Marcus 肯定其透明度承诺，但列举多方质疑：METR 与 AI 公司关系过近、Anthropic 借对华威胁维持加速、以及该提议可能意在抢先于真正的监管。",
+   "source": "Gary Marcus：The Road to AI We Can Trust（RSS）",
+   "url": null,
+   "at": "2026-09-13T18:34:31.000Z",
+   "reason": "作者肯定 Dario 提议中放慢节奏与透明度的部分，同时汇总多方对监管俘获、评估方独立性和对华姿态的质疑，并补充追责与召回两条政策思路。"
+  },
+  {
+   "title": "Anthropic 报告称胡塞组织用 Claude Code 开发导弹制导软件",
+   "summary": "Anthropic 9 月威胁报告披露，据评估极可能关联胡塞组织的也门小组使用 Claude Code 开发制导火箭、射程超 2，000 公里弹道导弹及名为 R2000 的高超声速滑翔载具概念的相关软件。",
+   "source": "Hacker News：AI 热帖",
+   "url": null,
+   "at": "2026-09-13T14:15:40.000Z",
+   "reason": "原文梳理了 Anthropic 威胁报告中也门组织用 Claude Code 并行推进导弹研发的完整链条，可帮助读者理解 AI 滥用如何绕过安全防护。"
+  }
+ ]
+}

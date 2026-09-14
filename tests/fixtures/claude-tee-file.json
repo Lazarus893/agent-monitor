@@ -1,0 +1,11 @@
+{
+ "_note": "tee 实际落盘的形状（2026-09-14 19:34 本机真实一份，数值保留、无 cwd/transcript_path/session_id）。注意 resets_at 是 epoch 秒 —— 这是 Claude Code 真实喂出来的编码，不是构造的。",
+ "writtenAt": "2026-09-14T19:34:31+08:00",
+ "payload": {
+  "rate_limits": {
+   "five_hour": { "used_percentage": 2, "resets_at": 1789401600 },
+   "seven_day": { "used_percentage": 10, "resets_at": 1789790400 }
+  },
+  "model": { "display_name": "Fable 5.1" }
+ }
+}

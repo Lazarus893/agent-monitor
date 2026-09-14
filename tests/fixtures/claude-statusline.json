@@ -1,0 +1,27 @@
+{
+ "_note": "构造样本：字段名与 ~/.claude/coralline/statusline.sh 第 85–100 行那一次 jq 取的路径逐条对齐（rate_limits.five_hour/seven_day 的 used_percentage + resets_at）。真实 JSON 由 Claude Code 每秒喂给 statusline，本仓库不留任何真实会话内容。",
+ "hook_event_name": "Status",
+ "session_id": "00000000-0000-4000-8000-000000000000",
+ "transcript_path": "/tmp/sample-project/transcript.jsonl",
+ "cwd": "/tmp/sample-project",
+ "version": "2.1.258",
+ "model": { "id": "claude-sample", "display_name": "Sample" },
+ "workspace": { "current_dir": "/tmp/sample-project", "project_dir": "/tmp/sample-project" },
+ "output_style": { "name": "default" },
+ "cost": {
+  "total_cost_usd": 1.2345,
+  "total_duration_ms": 456789,
+  "total_lines_added": 120,
+  "total_lines_removed": 34
+ },
+ "context_window": {
+  "used_percentage": 34,
+  "total_input_tokens": 120000,
+  "total_output_tokens": 8000,
+  "current_usage": { "cache_read_input_tokens": 90000, "cache_creation_input_tokens": 12000 }
+ },
+ "rate_limits": {
+  "five_hour": { "used_percentage": 18, "resets_at": "2026-09-14T17:00:00+08:00" },
+  "seven_day": { "used_percentage": 31, "resets_at": "2026-09-19T11:00:00+08:00" }
+ }
+}

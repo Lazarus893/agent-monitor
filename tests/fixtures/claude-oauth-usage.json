@@ -1,0 +1,5 @@
+{
+ "_note": "构造样本：/api/oauth/usage 今天在本机连续 429（真实响应见 claude-oauth-429.json），拿不到 200 正文。字段名按 PLAN.md §2.1 与 statusline 同构（five_hour / seven_day · used_percentage · resets_at），解析器对 utilization 别名也容错。",
+ "five_hour": { "used_percentage": 46, "resets_at": "2026-09-14T20:00:00+08:00" },
+ "seven_day": { "utilization": 52, "resets_at": 1789801200 }
+}

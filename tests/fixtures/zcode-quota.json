@@ -1,0 +1,22 @@
+{
+ "code": 200,
+ "msg": "操作成功",
+ "data": {
+  "limits": [
+   { "type": "TOKENS_LIMIT", "unit": 3, "number": 5, "percentage": 6, "nextResetTime": 1789394174232 },
+   { "type": "TOKENS_LIMIT", "unit": 6, "number": 1, "percentage": 19, "nextResetTime": 1789720533976 },
+   {
+    "type": "TIME_LIMIT", "unit": 5, "number": 1,
+    "usage": 1000, "currentValue": 19, "remaining": 981, "percentage": 1,
+    "nextResetTime": 1790157655982,
+    "usageDetails": [
+     { "modelCode": "search-prime", "usage": 19 },
+     { "modelCode": "web-reader", "usage": 0 },
+     { "modelCode": "zread", "usage": 0 }
+    ]
+   }
+  ],
+  "level": "pro"
+ },
+ "success": true
+}

@@ -11,7 +11,8 @@ import { registerShortcuts, unregisterShortcuts } from './shortcuts.js'
 import { CH } from '../shared/ipc.js'
 import type { DevMessage } from '../shared/ipc.js'
 import { SCENE_NAMES } from '../shared/types.js'
-import type { MonitorCommand, MonitorState, Page, SceneName } from '../shared/types.js'
+import type { AgentId, MonitorCommand, MonitorState, NoticeCode, Page, SceneName } from '../shared/types.js'
+import { setForcedError, startQuota } from './collectors/quota/index.js'
 
 const SHOOT = process.env.MONITOR_SHOOT === '1'
 const SELFTEST = process.env.MONITOR_SELFTEST === '1'
@@ -27,7 +28,9 @@ if (!app.requestSingleInstanceLock()) {
 async function main(): Promise<void> {
   await app.whenReady()
 
-  const store = new Store()
+  // 截图对账要的是 fixtures 的那七帧（逐像素跟原型比），别让真实采集把它们顶掉；
+  // 其余情况（pnpm dev / selftest）一律跑真实采集。
+  const store = new Store(SHOOT ? 'populated' : 'live')
   const mw = new MonitorWindow({
     rendererUrl: process.env.ELECTRON_RENDERER_URL,
     debug: DEBUG,
@@ -67,12 +70,25 @@ async function main(): Promise<void> {
     // M1 页码由渲染层的 pager 持有，主进程只记录，不回推（回推会和本地状态机打架）
     if (DEBUG) console.log(`[page] ${page}`)
   })
+  // 采集器在窗口加载完之后才 start（见下），这里先留个引用给 dev IPC 用
+  let quota: ReturnType<typeof startQuota> | null = null
+
   if (!app.isPackaged) {
     ipcMain.on(CH.dev, (_e, msg: DevMessage) => {
       switch (msg?.type) {
         case 'setState':
-          if ((SCENE_NAMES as string[]).includes(msg.name)) store.setScene(msg.name as SceneName)
+          if (msg.name === 'live') store.setLive()
+          else if ((SCENE_NAMES as string[]).includes(msg.name)) store.setScene(msg.name as SceneName)
           break
+        case 'forceError': {
+          const id = msg.agent as AgentId
+          if (id !== 'codex' && id !== 'claude' && id !== 'zcode') break
+          const ok = setForcedError(id, msg.code as NoticeCode | null)
+          console.log(`[quota:${id}] forceError ${msg.code ?? '(clear)'} → ${ok ? 'armed' : 'ignored'}`)
+          // 立刻重采一轮，否则 60 s 周期下要等一分钟才看得见
+          if (ok) quota?.kick(id)
+          break
+        }
         case 'simulateEvent':
           store.simulateEvent()
           break
@@ -92,6 +108,11 @@ async function main(): Promise<void> {
 
   await mw.load()
   mw.watch()
+
+  // 采集在窗口就绪之后才起：首轮结果到达时渲染层已经能收状态了
+  // dev 开关（MONITOR_FAKE_ERROR）只在未打包时认，别把调试旋钮留在产物里（复核 §1.5-2）
+  quota = SHOOT ? null : startQuota(store, { dev: !app.isPackaged })
+  app.on('will-quit', () => quota?.stop())
 
   // 工具脚本动态 import：截图与自检代码不该出现在生产 main bundle 里（复核 P2-5.3）
   if (SHOOT) {

@@ -129,6 +129,8 @@ design-system-extract（raycast → tokens.css）
 
 **2026-09-14 追加：轮播。** 副屏实测 3.5 英寸后，用户提出分页自动轮播。三个变体各自成为一页：A 总览（V1 的大数字）、B 额度详情（V3 的时间带）、C 事件，**每页停 60 s**（用户实机反馈 10/6/6 s 太快后改定）；新事件打断跳到 C 停满 60 s，「等待你」用专用整屏页接管直到处理完；右下角三点标示当前页。原型带「纯净模式」（`?pure=1` 或按 P）：隐藏控制栏并进入浏览器全屏，用于在副屏上还原最终效果。细则见 `design/brief-m0-rotation.md`。
 
+**2026-09-14 晚追加：v2 改动**（用户第二轮实机反馈，细则 `design/brief-m0-v2.md`）：C 页拆为 C1/C2 两页 session 列表并显示最后更新时间；B 页判语改为「当前窗口用得最多的模型」；新增 D 页 GitHub 式每日用量热力图（数据：`codexbar cost` 每日 token + ZCode 日志请求数）；新增 E 页「今日 AI 大事」5 条（AIHOT 匿名只读 API `GET /api/v1/items?mode=selected&window=24h&limit=5`，个人非商业使用，页面署名「数据来源：AIHOT」）；指示点居中下移；横向压缩补偿 `panelX`（960×540 模式默认 1.185，可用 ⌃⌥[ ] 微调）。
+
 ### 3.5 在 raycast 之上的项目特有决定（待 M0 出稿确认）
 
 - 身份色：Claude 陶土橙 `#d97757`、ZCode 智谱蓝（取 GLM 品牌蓝）、Codex 中性白；三者只用于徽记与事件行的色点，不做大面积填充。
@@ -178,7 +180,7 @@ Monitor/
 | 里程碑 | 交付 | 验收 |
 |---|---|---|
 | **M0 设计** ✅ 2026-09-14 | `design/tokens.css`、`design/wireframes.html`、`design/variations.html`（轮播版：A/B/C + attention 页，7 状态，真实数据）、留档 `variations-960x540.html` 与 `variations-35-single.html`、五份评审报告 `design/review/01–05`、作者笔记 `00` | 五轮评审共 3 P0 / 20+ P1 全部修复或有理由跳过；发布前验证 28/28、轮播 12/12 通过；待你在 artifact 里过目 |
-| **M1 骨架** | electron-vite 脚手架；窗口准确落在 TYPE-C；用 fixtures 渲染五态 | 拔插副屏窗口能迁移；五态截图各一张 |
+| **M1 骨架** ✅ 2026-09-14 | electron-vite 5 / Electron 44；`src/main`（displays.pickTarget、RelocateQueue、state、shortcuts）、`src/renderer`（四页移植、画布参数化）、63 条单测、selftest 14 项、28 张对账截图 `design/shots/m1/` | 代码复核 `docs/review/m1-code-review.md`：1 P0 + 4 P1 修复并复验通过；实机插拔由用户验证（待回报） |
 | **M2 额度** | 三个 quota collector + 重置倒计时 | 面板数字与 `codexbar` / Claude `/usage` / 智谱控制台一致 |
 | **M3 事件** | 三个 event collector、事件流、未读 / ack、提示音 | `codex exec "echo hi"` 2 秒内出现；`claude -p` 触发 Stop；ZCode 跑一个任务状态翻转 |
 | **M4 打磨** | 「等待你」状态、托盘、登录自启、electron-builder 打成 `~/Applications/Agent Monitor.app`、polish-pass | 四项审查过；连续运行 24h 无泄漏 |

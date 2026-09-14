@@ -13,6 +13,7 @@ export const CH = {
 
 export type DevMessage =
   | { type: 'setState'; name: string }
+  | { type: 'forceError'; agent: string; code: string | null }
   | { type: 'simulateEvent' }
   | { type: 'simulateAttention' }
   | { type: 'clearAttention' }
