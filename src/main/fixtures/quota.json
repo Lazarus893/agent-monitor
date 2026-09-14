@@ -1,0 +1,62 @@
+{
+ "generatedAt": "2026-09-14T16:32:48+08:00",
+ "codex": {
+  "status": "ok",
+  "source": "codexbar usage --provider codex --json (real, today)",
+  "plan": "plus",
+  "windows": [
+   {
+    "label": "5h",
+    "usedPercent": 22,
+    "resetsAt": "2026-09-14T08:56:08Z"
+   },
+   {
+    "label": "7d",
+    "usedPercent": 7,
+    "resetsAt": "2026-09-19T19:21:22Z"
+   }
+  ]
+ },
+ "claude": {
+  "status": "sample",
+  "source": "SAMPLE — /api/oauth/usage was rate-limited today; shape matches rate_limits.five_hour/seven_day",
+  "plan": "max_20x",
+  "windows": [
+   {
+    "label": "5h",
+    "usedPercent": 18,
+    "resetsAt": "2026-09-14T17:00:00+08:00"
+   },
+   {
+    "label": "7d",
+    "usedPercent": 31,
+    "resetsAt": "2026-09-19T11:00:00+08:00"
+   }
+  ]
+ },
+ "zcode": {
+  "status": "ok",
+  "source": "open.bigmodel.cn /api/monitor/usage/quota/limit (real, key read from Keychain)",
+  "plan": "bigmodel coding plan · pro",
+  "windows": [
+   {
+    "label": "5h",
+    "usedPercent": 61,
+    "resetsAt": "2026-09-14T16:42:27+08:00"
+   },
+   {
+    "label": "7d",
+    "usedPercent": 17,
+    "resetsAt": "2026-09-18T16:35:33+08:00"
+   },
+   {
+    "label": "1mo",
+    "usedPercent": 1,
+    "current": 8,
+    "total": 1000,
+    "unit": "MCP 调用",
+    "resetsAt": "2026-09-23T18:00:55+08:00"
+   }
+  ]
+ }
+}

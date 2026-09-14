@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=960">
+<title>Agent Monitor · 横向压缩校准</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; background: #07080a; color: #cdcdcd; }
+  body { width: 960px; height: 540px; overflow: hidden; box-sizing: border-box; padding: 14px 16px;
+         font-family: "Inter", -apple-system, "PingFang SC", sans-serif; display: flex; flex-direction: column; gap: 10px; }
+  .hint { font-family: "IBM Plex Mono", Menlo, monospace; font-size: 14px; letter-spacing: .06em; color: #9c9c9d; display: flex; justify-content: space-between; }
+  .row { display: flex; justify-content: space-between; align-items: flex-end; flex: 1; }
+  .cell { display: flex; flex-direction: column; align-items: center; gap: 10px; width: 150px; }
+  .disc { width: 120px; height: 120px; border-radius: 50%; border: 6px solid #f4f4f6; box-sizing: border-box; position: relative; }
+  .disc::before, .disc::after { content: ""; position: absolute; background: #6a6b6c; }
+  .disc::before { left: 50%; top: 8px; bottom: 8px; width: 2px; margin-left: -1px; }
+  .disc::after { top: 50%; left: 8px; right: 8px; height: 2px; margin-top: -1px; }
+  .k { font-family: "IBM Plex Mono", Menlo, monospace; font-size: 22px; font-weight: 500; color: #f4f4f6; }
+  .k small { font-size: 14px; color: #9c9c9d; font-weight: 400; display: block; text-align: center; }
+  .sample { display: flex; justify-content: space-between; align-items: center; }
+  .sample .cell { width: 150px; }
+  .txt { font-size: 40px; font-weight: 600; color: #f4f4f6; font-family: "IBM Plex Mono", Menlo, monospace; transform-origin: center; }
+  .cn { font-size: 20px; color: #cdcdcd; transform-origin: center; }
+</style>
+</head>
+<body>
+  <div class="hint"><span>横向压缩校准 · 副屏全屏后，找出看起来是正圆的那一个</span><span>把编号告诉我</span></div>
+
+  <div class="row">
+    <div class="cell"><div class="disc" style="transform:scaleX(1.00)"></div><div class="k">1<small>1.00</small></div></div>
+    <div class="cell"><div class="disc" style="transform:scaleX(1.04)"></div><div class="k">2<small>1.04</small></div></div>
+    <div class="cell"><div class="disc" style="transform:scaleX(1.07)"></div><div class="k">3<small>1.07</small></div></div>
+    <div class="cell"><div class="disc" style="transform:scaleX(1.11)"></div><div class="k">4<small>1.11</small></div></div>
+    <div class="cell"><div class="disc" style="transform:scaleX(1.15)"></div><div class="k">5<small>1.15</small></div></div>
+    <div class="cell"><div class="disc" style="transform:scaleX(1.19)"></div><div class="k">6<small>1.19</small></div></div>
+  </div>
+
+  <div class="sample">
+    <div class="cell"><div class="txt" style="transform:scaleX(1.00)">61%</div><div class="cn" style="transform:scaleX(1.00)">等待你</div></div>
+    <div class="cell"><div class="txt" style="transform:scaleX(1.04)">61%</div><div class="cn" style="transform:scaleX(1.04)">等待你</div></div>
+    <div class="cell"><div class="txt" style="transform:scaleX(1.07)">61%</div><div class="cn" style="transform:scaleX(1.07)">等待你</div></div>
+    <div class="cell"><div class="txt" style="transform:scaleX(1.11)">61%</div><div class="cn" style="transform:scaleX(1.11)">等待你</div></div>
+    <div class="cell"><div class="txt" style="transform:scaleX(1.15)">61%</div><div class="cn" style="transform:scaleX(1.15)">等待你</div></div>
+    <div class="cell"><div class="txt" style="transform:scaleX(1.19)">61%</div><div class="cn" style="transform:scaleX(1.19)">等待你</div></div>
+  </div>
+
+  <div class="hint"><span>每列下方是同一比例拉伸后的数字与汉字，圆正了字形也就正了</span><span>1 = 不补偿</span></div>
+  <script>
+    document.addEventListener('keydown', (e) => { if (e.key === 'f' || e.key === 'F') document.documentElement.requestFullscreen(); });
+  </script>
+</body>
+</html>

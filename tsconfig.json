@@ -1,0 +1,5 @@
+{
+  // 占位：main/preload/shared/scripts/tests 走 tsconfig.node.json，渲染层走 tsconfig.web.json。
+  // 不用 references —— 那要求两个子 project 都开 composite，而我们从不跑 tsc -b。
+  "files": []
+}

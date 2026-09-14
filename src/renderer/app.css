@@ -1,0 +1,314 @@
+/* ==========================================================================
+   画布样式 —— 逐行取自 design/variations.html 的第三个 <style> 块（STAGE 段）。
+   只有三处改动，都因为「浏览器里的一块 stage」变成了「一整块屏」：
+     1. .stage 去掉 border-radius / box-shadow —— 原型用它们把画布从灰底上框出来，
+        副屏上没有底，框线就成了一圈杂边。
+     2. body 直接是 --canvas，无 padding —— 窗口 bounds 就是 960×540，
+        画布 480×270 靠 zoom: 2 铺满，主进程不再另设 zoomFactor（避免双重缩放）。
+     3. 末尾追加 .harness 调试栏：?debug=1 才显示，position:fixed 浮在画布之上，
+        不进 .stage，因此不改变任何画布内的布局与间距栅格。
+     4. .stage 的尺寸改成 --canvas-w / --canvas-h（回落到 tokens 的 --screen-w/h）。
+        这块面板的原生像素是 960×640，当前 960×540 @2x 是缩放器压出来的；
+        用户切到原生模式后画布就是 480×320。四页的主体都是 flex:1 / grid 1fr，
+        多出来的 50px 自动落到 A 页瓦片高度、B 页三条带与 C 页的行区，不会溢出。
+   token 真源仍是 design/tokens.css，由 app.ts 直接 import，不在这里抄。
+   ========================================================================== */
+
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--canvas);overflow:hidden;
+  display:flex;align-items:center;justify-content:center}
+
+.stage{width:var(--canvas-w,var(--screen-w));height:var(--canvas-h,var(--screen-h));zoom:var(--screen-zoom);
+  background:var(--canvas);position:relative;overflow:hidden;
+  font-family:var(--font-sans);font-feature-settings:var(--font-features);
+  color:var(--body);-webkit-font-smoothing:antialiased}
+
+/* ==========================================================================
+   STAGE —— 画布坐标 480×270
+   ========================================================================== */
+.screen{position:absolute;inset:var(--pad-screen);display:flex;flex-direction:column}
+.stage :where(h1,h2){margin:0;font:inherit;letter-spacing:inherit;color:inherit}
+.sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;
+  overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* 顶栏用显式的两列栅格而不是 margin:auto —— auto margin 会被 getComputedStyle
+   解析成一个巨大的 used value（实测 371.58px），在「间距必须落在栅格上」这条
+   断言里读起来像一个野值。用 grid-column 定位，语义也更准：左槽是状态，右槽是时钟。 */
+.topbar{height:var(--h-topbar);flex:none;display:grid;grid-template-columns:1fr auto;
+  align-items:center;column-gap:var(--sp-sm)}
+.topbar #topLoading{grid-column:1;justify-self:start}
+.topbar #topLoading[hidden]{display:none}
+.topbar .tb-right{grid-column:2;justify-self:end;display:flex;align-items:baseline;gap:var(--sp-xs)}
+/* R3-16（lead 拍板）· 未读数并进时钟那一行，只在 A / B 页且未读 >0 时出现。
+   --mute 不是 accent 色，不计入 ≤2；C 页不显示，那里行本身已经在表达。 */
+.unread{font-family:var(--font-num);font-feature-settings:var(--num-features);
+  font-variant-numeric:tabular-nums;font-size:var(--fs-min);color:var(--mute);line-height:1}
+.unread:empty{display:none}
+.clock{font-family:var(--font-num);font-feature-settings:var(--num-features);
+  font-variant-numeric:tabular-nums;font-size:var(--fs-min);font-weight:var(--w-emph);color:var(--mute);line-height:1}
+
+/* ---- 页容器：横向滑动切页 ---- */
+.pages{flex:1;min-height:0;margin-top:var(--gap-block);position:relative;overflow:hidden}
+.page{position:absolute;inset:0;padding-bottom:12px;display:flex;flex-direction:column;
+  opacity:0;pointer-events:none;transform:translateX(-24px);
+  transition:opacity var(--dur-page) var(--ease-standard),transform var(--dur-page) var(--ease-standard)}
+.page[data-on="1"]{opacity:1;pointer-events:auto;transform:none}
+
+/* ---- 页指示：右下角三点。简报明确写了这不算 accent ---- */
+.dots{position:absolute;right:0;bottom:0;display:flex;align-items:center;z-index:3}
+/* 视觉仍是 4px 点，热区放大到 24×24：点本身用伪元素画，button 只负责命中 */
+.dots button{appearance:none;border:0;background:transparent;padding:0;cursor:pointer;
+  width:24px;height:24px;display:grid;place-items:center}
+.dots button::after{content:"";width:4px;height:4px;border-radius:var(--r-full);background:var(--ash);
+  transition:background var(--dur-state) var(--ease-standard)}
+.dots button[data-on="1"]::after{background:var(--ink)}
+.dots button:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--accent);border-radius:var(--r-xs)}
+/* 手动暂停标记：14px「‖」，让「是我按停的」一直可见，而不是让人以为轮播坏了 */
+.holdmark{font-size:var(--fs-min);color:var(--mute);line-height:1;padding-right:var(--sp-xs)}
+.holdmark[hidden]{display:none}
+
+/* ---- 左右各 15% 的边缘切页热区：无常驻控件，hover 才浮出 chevron ---- */
+.edge{position:absolute;top:0;bottom:0;width:15%;border:0;background:transparent;padding:0;
+  cursor:pointer;display:grid;place-items:center;z-index:2;color:var(--mute)}
+.edge[data-side="prev"]{left:0}
+.edge[data-side="next"]{right:0}
+.edge svg{opacity:0;transition:opacity var(--dur-state) var(--ease-standard)}
+.edge[data-hint="1"] svg{opacity:1}
+.edge:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--accent);border-radius:var(--r-sm)}
+
+/* ---- 共用：瓦片 / 状态点 / 数字 / 轨道 ---- */
+.tile{background:var(--surface);border:1px solid var(--hairline);border-radius:var(--r-md);
+  display:flex;flex-direction:column;min-width:0;position:relative;
+  transition:background var(--dur-state) var(--ease-standard)}
+.tile-name{font-weight:var(--w-emph);color:var(--ink);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;line-height:1.2}
+.iddot{width:var(--dot);height:var(--dot);border-radius:var(--r-full);background:var(--idc);flex:none}
+.iddot[data-off="1"]{background:var(--ash)}
+.tile[data-status="running"] .iddot{animation:pulse var(--cycle-pulse) var(--ease-standard) infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.tile[data-status="attention"]{background:var(--surface-elevated)}
+.tile[data-status="attention"]::before,
+.row[data-kind="attention"]::before,
+.attn-card::before{content:"";position:absolute;inset:0;border-radius:inherit;background:var(--ink);
+  opacity:0;pointer-events:none;animation:breathe var(--cycle-breathe) ease-in-out infinite}
+@keyframes breathe{0%,100%{opacity:0}50%{opacity:.06}}
+.tile[data-status="attention"] .iddot{background:var(--accent);box-shadow:0 0 0 2px rgba(244,244,246,.14)}
+
+.num{font-family:var(--font-num);font-feature-settings:var(--num-features);
+  font-variant-numeric:tabular-nums;font-weight:var(--w-emph);color:var(--ink);
+  line-height:1.05;letter-spacing:var(--tr-num)}
+.unit{font-family:var(--font-num);font-weight:var(--w-emph);color:var(--body);line-height:1}
+.mono{font-family:var(--font-num);font-feature-settings:var(--num-features);
+  font-variant-numeric:tabular-nums;line-height:1}
+[data-level="warn"]   .num,[data-level="warn"]   .unit{color:var(--quota-warn)}
+[data-level="danger"] .num,[data-level="danger"] .unit{color:var(--quota-danger)}
+
+/* 轨道 --ash 3.64:1；填充 --charcoal 3.57:1；末端一道 2px --canvas 缺口 */
+.bar{background:var(--quota-track);border-radius:var(--r-full);overflow:hidden;flex:none}
+.bar>i{display:block;height:100%;background:var(--quota-fill);border-radius:var(--r-full);
+  box-shadow:var(--quota-notch-w) 0 0 var(--quota-notch);
+  transition:width var(--dur-bar) var(--ease-standard)}
+.bar[data-level="warn"]>i{background:var(--quota-warn)}
+.bar[data-level="danger"]>i{background:var(--quota-danger)}
+
+/* ---- 五态消息块 ---- */
+/* R5-09 · msg 态原来按各自内容垂直居中，行数不同就不共基线（实测最大差 19px）。
+   改 flex-start，三块的第一行文字对齐——居中留给单块独立出现的场合。 */
+.msg{flex:1;display:flex;flex-direction:column;justify-content:flex-start;gap:var(--sp-xs);min-width:0}
+.page-a .msg{padding-top:var(--sp-md)}
+.msg-head{display:flex;align-items:center;gap:var(--sp-xs);color:var(--ink);
+  font-size:var(--fs-body-r);font-weight:var(--w-emph);line-height:1.2}
+.msg-head svg{flex:none;color:var(--mute)}
+.msg[data-tone="error"] .msg-head svg{color:var(--danger)}
+.msg p{margin:0;font-size:var(--fs-min);line-height:1.35;color:var(--mute);
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.skel{display:flex;flex-direction:column;gap:var(--sp-sm);flex:1;justify-content:center}
+.skel i{display:block;background:var(--stone);border-radius:var(--r-xs)}
+.loading-label{font-size:var(--fs-min);letter-spacing:var(--tr-small);color:var(--mute);font-weight:var(--w-emph)}
+
+/* ==========================================================================
+   A 页 · 总览
+   ========================================================================== */
+.page-a .tiles{flex:1;display:grid;grid-template-columns:repeat(3,1fr);gap:var(--gap-tile);min-height:0}
+.page-a .tile{padding:var(--sp-sm);gap:var(--sp-sm)}
+.page-a .tile-head{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-xs);flex:none;height:20px}
+.page-a .tile-name{font-size:var(--fs-body-r)}
+.page-a .a-body{flex:1;display:flex;flex-direction:column;justify-content:center;gap:var(--sp-md);min-width:0}
+.page-a .a-nums{display:flex;align-items:baseline;gap:2px;min-width:0}
+.page-a .a-nums .num{font-size:var(--fs-num-a)}
+/* R5-11 · 原来三位数降到 48px，低于 A 页 ≥64px 的下限，而「额度用尽」恰恰最该喊出来。
+   实测 64px 三位数约 111px < 133px 内宽，放得下——不降档，改藏掉此时冗余的 %。 */
+.page-a .a-nums[data-wide="1"] .unit{display:none}
+.page-a .a-nums .unit{font-size:var(--fs-unit-r)}
+/* 倒计时 18px（R4-06 点名要提上来），状态词 14px —— 两者分档才在 123px 的瓦片
+   内宽里放得下，也让「数字」与「说明」不再是同一个视觉层 */
+.page-a .tile-foot{flex:none;height:24px;display:flex;align-items:baseline;gap:var(--sp-xs);
+  color:var(--mute);white-space:nowrap;overflow:hidden;line-height:1.2}
+.page-a .tile-foot .cd{font-size:var(--fs-cd-a);font-weight:var(--w-emph)}
+.page-a .tile-foot .word{font-size:var(--fs-min)}
+.page-a .tile-foot svg{align-self:center}
+.page-a .tile-foot svg{color:var(--mute);flex:none}
+.page-a .tile-foot[data-level="warn"]   svg{color:var(--quota-warn)}
+.page-a .tile-foot[data-level="danger"] svg{color:var(--quota-danger)}
+.page-a .tile-foot[data-level="warn"]   span,
+.page-a .tile-foot[data-level="danger"] span{color:var(--body)}
+.page-a .tile-foot[data-status="attention"] svg,
+.page-a .tile-foot[data-status="attention"] span{color:var(--ink)}
+.page-a .tile-foot:empty{visibility:hidden}
+.page-a .verdict-word{font-family:var(--font-sans);font-size:var(--fs-min)}
+
+/* ==========================================================================
+   B 页 · 额度详情
+   ========================================================================== */
+.page-b .bands{flex:1;display:flex;flex-direction:column;gap:var(--sp-md);min-height:0}
+.page-b .tile{flex:1;min-height:0;padding:var(--sp-sm) var(--sp-md);gap:var(--sp-sm);justify-content:center}
+.page-b .b-head{display:flex;align-items:center;gap:var(--sp-sm);height:22px;flex:none}
+/* R3-05 固定列宽让三条判语共享左边缘；R5-08 修正两点：108px 对「Claude Code」
+   余量归零（实测需 109px），且 inline-flex 下 text-overflow 对匿名文本项不生效——
+   省略号「装了但没通电」。改 min-width:112px + 内层 span 承载省略号。 */
+.page-b .b-name{font-size:var(--fs-body-r);font-weight:var(--w-emph);color:var(--ink);
+  display:flex;align-items:center;gap:var(--sp-xs);min-width:112px;flex:none;line-height:1}
+.page-b .b-name span.t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.page-b .b-verdict{font-size:var(--fs-min);color:var(--mute);flex:1;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.2}
+.page-b .b-verdict[data-tone="over"]{color:var(--quota-warn)}
+.page-b .b-verdict[data-tone="error"]{color:var(--danger)}
+.page-b .b-verdict[data-tone="attn"]{color:var(--ink);font-weight:var(--w-read)}
+.page-b .b-pc{font-size:var(--fs-num-b);font-weight:var(--w-emph);color:var(--ink);flex:none}
+.page-b [data-level="warn"]   .b-pc{color:var(--quota-warn)}
+.page-b [data-level="danger"] .b-pc{color:var(--quota-danger)}
+.page-b .b-sec{font-size:var(--fs-body-r);color:var(--mute);flex:none}
+.page-b .b-cd{font-size:var(--fs-min);color:var(--mute);flex:none;width:48px;text-align:right}
+.page-b .band{position:relative;height:12px;flex:none;
+  background:var(--quota-track);border-radius:var(--r-xs);overflow:hidden}
+.page-b .band .used{position:absolute;left:0;top:0;bottom:0;background:var(--quota-fill);
+  border-radius:var(--r-xs) 0 0 var(--r-xs);
+  box-shadow:var(--quota-notch-w) 0 0 var(--quota-notch);
+  transition:width var(--dur-bar) var(--ease-standard)}
+.page-b [data-level="warn"]   .band .used{background:var(--quota-warn)}
+.page-b [data-level="danger"] .band .used{background:var(--quota-danger)}
+/* 「现在」游标：--canvas，对轨道 3.75、对各档填充 6.81–13.39，不随填充色漂移 */
+.page-b .band .caret{position:absolute;top:0;bottom:0;width:2px;background:var(--quota-notch);margin-left:-1px}
+/* R5-02 · 重置刻度原来是带内一道 --mute 竖线，对 ash 轨道只有 1.95:1，不可辨；
+   而且在 97% 那种窗口末期会和「现在」游标挤成一个 4px 的明暗簇（R5-10）。
+   改成与游标同源的机制：上下各出头 2px 落到带外的 --surface 上（7.09:1），
+   靠位置和出头形状传信息，不靠颜色差，也就再不会与带内的游标争同一段像素。 */
+.page-b .bandbox{position:relative;flex:none}
+.page-b .band .resettick{display:none}
+.page-b .bandbox .resettick{position:absolute;top:-2px;bottom:-2px;right:0;width:2px;
+  background:var(--mute);border-radius:1px}
+.page-b .b-note{font-size:var(--fs-min);color:var(--body);line-height:1.3;flex:none;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ==========================================================================
+   C 页 · 事件
+   ========================================================================== */
+.page-c .feed{flex:1;display:flex;flex-direction:column;gap:var(--sp-xs);min-height:0;overflow:hidden}
+.row{appearance:none;-webkit-appearance:none;width:100%;text-align:left;
+  background:transparent;border:1px solid transparent;border-radius:var(--r-sm);
+  color:inherit;font:inherit;cursor:pointer;flex:none;position:relative;
+  display:grid;align-items:center;column-gap:var(--sp-sm);padding:0 var(--sp-sm);
+  grid-template-columns:64px minmax(0,1fr) 68px 14px var(--dot);height:46px;
+  transition:background var(--dur-state) var(--ease-standard),border-color var(--dur-state) var(--ease-standard)}
+
+.row.lead{height:56px}
+.row.lead .rtitle{font-size:var(--fs-lead-r);font-weight:var(--w-emph);color:var(--ink);line-height:1.15}
+.chip{font-size:var(--fs-min);font-weight:var(--w-emph);letter-spacing:var(--tr-caps);
+  text-transform:uppercase;color:var(--idc);white-space:nowrap;line-height:1.2}
+.attn-tag{display:inline-flex;align-items:center;gap:var(--sp-xs);font-size:var(--fs-min);
+  font-weight:var(--w-emph);letter-spacing:var(--tr-small);color:var(--ink);white-space:nowrap;line-height:1}
+.rtitle{font-size:var(--fs-body-r);line-height:1.2;color:var(--body);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.rtime{font-family:var(--font-num);font-feature-settings:var(--num-features);
+  font-variant-numeric:tabular-nums;font-size:var(--fs-min);color:var(--mute);
+  white-space:nowrap;text-align:right;line-height:1}
+.rkind{display:inline-flex;align-items:center;justify-content:center;color:var(--mute)}
+.rkind[data-kind="failed"]{color:var(--danger)}
+.rkind[data-kind="running"]{color:var(--idc);animation:pulse var(--cycle-pulse) var(--ease-standard) infinite}
+.rmark{width:var(--dot);height:var(--dot);border-radius:var(--r-full);background:transparent;justify-self:end}
+.row[data-unread="1"]{background:var(--surface)}
+.row[data-unread="1"] .rtitle{color:var(--ink);font-weight:var(--w-emph)}
+.row[data-unread="1"] .rmark{background:var(--accent)}
+.row[data-aged="1"] .rtitle{color:var(--body);font-weight:var(--w-read)}
+.row[data-aged="1"] .rmark{background:var(--accent-dim)}
+.row[data-kind="attention"]{background:var(--surface-card);border-color:var(--ash)}
+.row[data-kind="attention"] .rtitle{color:var(--ink);font-weight:var(--w-emph)}
+.row[data-kind="attention"] .rmark{background:var(--accent)}
+/* R5-06 · hover 必须排在属性规则之后，否则未读行（surface）与 attention 行
+   （surface-card）的背景会把它盖掉，等于这两类行没有 hover 反馈。
+   attention 行已经在 surface-card 上，再升一档没有余量，改用 1px --ash 内描边。 */
+.row:hover{background:var(--surface-card)}
+.row[data-kind="attention"]:hover{box-shadow:inset 0 0 0 1px var(--ash)}
+.row:active{background:var(--surface-elevated);box-shadow:inset 0 0 0 1px var(--ash);
+  transition-duration:var(--dur-instant)}
+.row:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--accent)}
+
+.row.enter{animation:enter var(--dur-event) var(--ease-standard) both}
+@keyframes enter{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+.feed-msg{flex:1;display:flex;flex-direction:column;justify-content:center;gap:var(--sp-xs);padding:0 var(--sp-sm)}
+.feed-skel{flex:1;display:flex;flex-direction:column;gap:var(--sp-xs)}
+.feed-skel i{display:block;height:46px;background:var(--stone);border-radius:var(--r-sm);flex:none}
+.feed-skel i:first-child{height:56px}
+
+/* ==========================================================================
+   attention 页 · 整屏只为这一件事
+   ========================================================================== */
+.page-attn{justify-content:center}
+.attn-card{background:var(--surface-card);border:1px solid var(--ash);border-radius:var(--r-md);
+  padding:var(--sp-lg);display:flex;flex-direction:column;gap:var(--sp-md);position:relative}
+.attn-who{display:inline-flex;align-items:center;gap:var(--sp-sm);font-size:var(--fs-body-r);
+  font-weight:var(--w-emph);letter-spacing:var(--tr-caps);text-transform:uppercase;color:var(--idc);line-height:1}
+.attn-who::before{content:"";width:var(--dot);height:var(--dot);border-radius:var(--r-full);background:var(--idc)}
+/* R5-20 · accent 的定义是「未读 / 需要你」，而这一页就是「需要你」本身，
+   原来却是全屏 0 处 accent。用与未读点同一套词汇（6px 圆点）在卡片右上兑现一次，
+   身份仍由左侧的身份色点 + 大写徽记承担。做成真实元素而不是伪元素——
+   伪元素躲得过 accent 全量扫描，那这处 accent 在断言里就是隐形的。 */
+.attn-dot{position:absolute;top:var(--sp-md);right:var(--sp-md);
+  width:var(--dot);height:var(--dot);border-radius:var(--r-full);background:var(--accent)}
+.attn-lead{display:flex;align-items:center;gap:var(--sp-sm);font-size:var(--fs-attn-lead);
+  font-weight:var(--w-announce);color:var(--ink);line-height:1.1}
+.attn-lead svg{flex:none}
+.attn-what{font-size:var(--fs-attn-body);line-height:1.35;color:var(--body);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.attn-meta{font-size:var(--fs-min);color:var(--mute);display:flex;gap:var(--sp-sm);align-items:baseline}
+.attn-meta .mono{font-size:var(--fs-min)}
+
+/* ==========================================================================
+   REDUCED MOTION —— 媒体查询与控制栏开关，任一生效即全停（含切页动画）
+   ========================================================================== */
+@media (prefers-reduced-motion:reduce){
+  .stage *,.stage *::before,.stage *::after{animation:none!important;transition:none!important}
+  .page{transform:none!important}
+}
+html[data-rm="1"] .stage *,
+html[data-rm="1"] .stage *::before,
+html[data-rm="1"] .stage *::after{animation:none!important;transition:none!important}
+html[data-rm="1"] .page{transform:none!important}
+
+/* ==========================================================================
+   调试栏 —— 纯工具，?debug=1 才存在。刻意用 system-ui 与项目字体拉开，
+   提示它不参与设计；fixed 浮在画布上，不占画布的任何一格。
+   ========================================================================== */
+.harness{position:fixed;left:0;right:0;bottom:0;z-index:99;
+  display:none;flex-wrap:wrap;align-items:center;gap:6px 14px;
+  padding:8px 10px;background:rgba(24,26,29,.94);border-top:1px solid #3c3f44;
+  color:#c9ccd1;font:12px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}
+html[data-debug="1"] .harness{display:flex}
+.hgroup{display:flex;align-items:center;gap:6px}
+.hgroup>b{font-weight:600;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#8b8f96}
+.seg{display:flex;background:#25272a;border:1px solid #3c3f44;border-radius:6px;overflow:hidden}
+.seg button{appearance:none;border:0;background:transparent;color:#c9ccd1;
+  font:11px/1 system-ui,sans-serif;padding:6px 8px;cursor:pointer;border-right:1px solid #3c3f44}
+.seg button:last-child{border-right:0}
+.seg button:hover{background:#2e3134}
+.seg button[aria-pressed="true"]{background:#4a4e55;color:#fff}
+.seg button:focus-visible{outline:2px solid #8ab4ff;outline-offset:-2px}
+.hbtn{appearance:none;border:1px solid #3c3f44;background:#25272a;color:#e6e8ea;
+  font:11px/1 system-ui,sans-serif;padding:6px 10px;border-radius:6px;cursor:pointer}
+.hbtn:hover{background:#2e3134}
+.hbtn:focus-visible{outline:2px solid #8ab4ff;outline-offset:1px}
+.hcheck{display:flex;align-items:center;gap:5px;font-size:11px;cursor:pointer;user-select:none}
+.hcheck input{accent-color:#8ab4ff;width:13px;height:13px;cursor:pointer}
+.hmeter{font:11px/1 ui-monospace,SFMono-Regular,Menlo,monospace;color:#8ab4ff;
+  background:#25272a;border:1px solid #3c3f44;border-radius:6px;padding:6px 8px;min-width:170px}

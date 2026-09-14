@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN" data-page="a" data-state="populated" data-rm="0" data-rotate="1">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; connect-src 'self'">
+<title>Agent Monitor</title>
+<!--
+  纯净视图：没有控制栏，body 就是 --canvas，画布 480×270 靠 zoom: 2 铺满 960×540。
+  ?debug=1 时底部浮出原型的控制栏（七态 / 模拟 / 轮播开关 / reduced-motion），
+  它是 position:fixed 的工具层，不进画布。
+  字体自带（@fontsource），CSP 也不放行外部域 —— 面板不连网。
+-->
+</head>
+<body>
+
+<div class="stage" id="stage">
+  <div class="screen">
+    <h1 class="sr">Agent Monitor 副屏面板</h1>
+    <div class="topbar">
+      <span class="loading-label" id="topLoading" hidden>读取中</span>
+      <span class="tb-right"><span class="clock" id="clock" data-clock>--:--</span><span class="unread" id="unread"></span></span>
+    </div>
+    <div class="pages" id="pages">
+      <section class="page page-a" data-p="a"><h2 class="sr">额度总览</h2><div class="tiles" id="paTiles"></div></section>
+      <section class="page page-b" data-p="b"><h2 class="sr">额度详情</h2><div class="bands" id="pbBands"></div></section>
+      <section class="page page-c" data-p="c"><h2 class="sr" id="feedTitle">最近完成</h2><div class="feed" id="pcFeed"></div></section>
+      <section class="page page-attn" data-p="attn"><h2 class="sr">需要你</h2><div id="paAttn"></div></section>
+      <button type="button" class="edge" data-side="prev" aria-label="上一页"></button>
+      <button type="button" class="edge" data-side="next" aria-label="下一页"></button>
+      <div class="dots" id="dots" data-not-accent>
+        <span class="holdmark" id="holdmark" data-not-accent hidden>&#8214;</span>
+        <button type="button" data-p="a" data-not-accent aria-label="第 1 页 总览"></button>
+        <button type="button" data-p="b" data-not-accent aria-label="第 2 页 额度详情"></button>
+        <button type="button" data-p="c" data-not-accent aria-label="第 3 页 事件"></button>
+      </div>
+    </div>
+  </div>
+  <p class="sr" role="status" aria-live="polite" id="live"></p>
+</div>
+
+<div class="harness" id="harness">
+  <div class="hgroup"><b>页</b>
+    <div class="seg" id="segPage" role="group" aria-label="切换页">
+      <button type="button" data-p="a" aria-pressed="true">A 总览</button>
+      <button type="button" data-p="b" aria-pressed="false">B 额度</button>
+      <button type="button" data-p="c" aria-pressed="false">C 事件</button>
+      <button type="button" data-p="attn" aria-pressed="false">attention</button>
+    </div>
+  </div>
+  <div class="hgroup">
+    <label class="hcheck"><input type="checkbox" id="chkRotate" checked> 自动轮播</label>
+    <span class="hmeter" id="meter">A · 60.0s</span>
+  </div>
+  <div class="hgroup"><b>状态</b>
+    <div class="seg" id="segState" role="group" aria-label="切换状态">
+      <button type="button" data-s="populated" aria-pressed="true">populated</button>
+      <button type="button" data-s="loading"   aria-pressed="false">loading</button>
+      <button type="button" data-s="empty"     aria-pressed="false">empty</button>
+      <button type="button" data-s="error"     aria-pressed="false">error</button>
+      <button type="button" data-s="edge"      aria-pressed="false">edge</button>
+      <button type="button" data-s="attention" aria-pressed="false">attention</button>
+      <button type="button" data-s="running"   aria-pressed="false">running</button>
+    </div>
+  </div>
+  <div class="hgroup">
+    <button type="button" class="hbtn" id="btnPush">模拟新事件</button>
+    <button type="button" class="hbtn" id="btnAttn">模拟等待批准</button>
+    <label class="hcheck"><input type="checkbox" id="chkRm"> reduced-motion</label>
+  </div>
+</div>
+
+<script type="module" src="./app.ts"></script>
+</body>
+</html>

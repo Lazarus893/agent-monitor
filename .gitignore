@@ -4,3 +4,5 @@ out/
 .DS_Store
 *.log
 .claude/
+*.tsbuildinfo
+test-results/
