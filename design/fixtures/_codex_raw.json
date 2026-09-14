@@ -1,0 +1,35 @@
+[
+ {
+  "credits": {
+   "remaining": 0,
+   "events": [],
+   "updatedAt": "2026-09-14T06:30:36Z"
+  },
+  "source": "codex-cli",
+  "provider": "codex",
+  "usage": {
+   "primary": {
+    "resetDescription": "16:56",
+    "usedPercent": 22,
+    "windowMinutes": 300,
+    "resetsAt": "2026-09-14T08:56:08Z"
+   },
+   "secondary": {
+    "resetDescription": "2026年9月20日 3:21",
+    "usedPercent": 7,
+    "windowMinutes": 10080,
+    "resetsAt": "2026-09-19T19:21:22Z"
+   },
+   "tertiary": null,
+   "loginMethod": "plus",
+   "updatedAt": "2026-09-14T06:30:34Z",
+   "accountEmail": "<redacted>",
+   "identity": {
+    "loginMethod": "plus",
+    "providerID": "codex",
+    "accountEmail": "<redacted>"
+   }
+  },
+  "version": "0.147.0"
+ }
+]

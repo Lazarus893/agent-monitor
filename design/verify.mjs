@@ -1,0 +1,334 @@
+import { chromium } from 'playwright';
+import fs from 'node:fs';
+
+const FILE  = 'file:///Users/tonyye/Projects/Monitor/design/variations.html';
+const SHOTS = '/Users/tonyye/Projects/Monitor/design/shots';
+fs.mkdirSync(SHOTS, { recursive: true });
+
+const PAGES  = ['a', 'b', 'c', 'attn'];
+const STATES = ['populated', 'loading', 'empty', 'error', 'edge', 'attention', 'running'];
+const FONT_FLOOR = 14;                       // R4-06 · 轮播版把下限从 12 抬到 14
+// R5-05 · 间距栅格与「允许的例外」。这份清单必须与 tokens.css §6 逐字对应；
+// 断言不再靠手写核对，而是运行时扫描全部 gap/padding/margin 后与它比集合。
+const SCALE = [0, 2, 4, 8, 12, 16, 24, 32];
+const SPACING_EXCEPTIONS = [];               // 目标：空集
+
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1100, height: 900 }, deviceScaleFactor: 2 });
+const consoleErrors = [];
+page.on('console', m => { if (m.type() === 'error') consoleErrors.push(m.text()); });
+page.on('pageerror', e => consoleErrors.push('PAGEERROR: ' + e.message));
+
+// 字体走 Google Fonts CDN，偶发挂起；等 DOM 就绪即可，字体到位与否不影响断言语义
+await page.goto(FILE, { waitUntil: 'domcontentloaded' });
+await page.evaluate(() => Promise.race([document.fonts.ready, new Promise(r => setTimeout(r, 4000))]));
+await page.waitForTimeout(900);
+await page.uncheck('#chkRotate');            // 逐格检查时关掉轮播，避免页自己跑掉
+
+const problems = [];
+let trackReportOnce = null;
+
+for (const p of PAGES) {
+  for (const s of STATES) {
+    await page.click(`#segState button[data-s="${s}"]`);
+    await page.click(`#segPage button[data-p="${p}"]`);
+    await page.waitForTimeout(220);
+
+    const r = await page.evaluate(({ FONT_FLOOR, SCALE_IN }) => {
+      const stage = document.getElementById('stage');
+      const sb = stage.getBoundingClientRect();
+      const out = [];
+      const parse = c => (c.match(/[\d.]+/g) || []).map(Number);
+      const lin = v => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+      const lum = ([r, g, b]) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+      const over = (fg, bg) => { const a = fg[3] ?? 1; return [0, 1, 2].map(i => fg[i] * a + bg[i] * (1 - a)); };
+      const ratio = (a, b) => { const [l1, l2] = [lum(a), lum(b)].sort((x, y) => y - x); return (l1 + 0.05) / (l2 + 0.05); };
+      const bgOf = el => { let n = el;
+        while (n && n !== document.documentElement) {
+          const c = parse(getComputedStyle(n).backgroundColor);
+          if (c.length && (c[3] ?? 1) > 0.95) return c.slice(0, 3);
+          n = n.parentElement; } return [7, 8, 10]; };
+      const live = document.querySelector('.page[data-on="1"]');
+
+      // 1 · 画布边界。待命页停在画布左外侧是刻意的，不查；4 页 × 7 态的循环
+      //     保证每一页都会在「它是当前页」那一格被完整检查。
+      for (const n of stage.querySelectorAll('*')) {
+        if (n.closest('.sr') || n.closest('.page[data-on="0"]')) continue;
+        const b = n.getBoundingClientRect();
+        if (b.width === 0 && b.height === 0) continue;
+        if (b.left < sb.left - 1 || b.right > sb.right + 1 || b.top < sb.top - 1 || b.bottom > sb.bottom + 1)
+          out.push(`OUTSIDE ${n.className || n.tagName}`);
+      }
+      // 2 · 裁切 / 溢出
+      for (const n of stage.querySelectorAll('.screen,.pages,.page,.tiles,.bands,.feed,.tile,.tile-head,.tile-foot,.row,.b-head,.band,.msg,.attn-card')) {
+        if (n.closest('.page[data-on="0"]')) continue;
+        const cs = getComputedStyle(n);
+        if (cs.overflowY !== 'visible' || cs.overflowX !== 'visible') {
+          if (n.scrollHeight > n.clientHeight + 1 || n.scrollWidth > n.clientWidth + 1)
+            out.push(`CLIP ${n.className} ${n.scrollHeight}x${n.scrollWidth} > ${n.clientHeight}x${n.clientWidth}`);
+          continue;
+        }
+        const pb = n.getBoundingClientRect();
+        for (const c of n.children) {
+          if (c.closest('.sr')) continue;
+          if (getComputedStyle(c).transform !== 'none') continue;
+          const cb = c.getBoundingClientRect();
+          if (cb.width === 0 && cb.height === 0) continue;
+          if (cb.top < pb.top - 1 || cb.bottom > pb.bottom + 1 || cb.left < pb.left - 1 || cb.right > pb.right + 1)
+            out.push(`SPILL ${c.className || c.tagName} out of ${n.className}`);
+        }
+      }
+      // 3 · 字号下限 14（所有页，它们都会被轮到）
+      let minFont = 999;
+      for (const n of stage.querySelectorAll('*')) {
+        if (!n.textContent.trim() || n.children.length || n.closest('.sr')) continue;
+        if (n.closest('.page[data-on="0"]')) continue;
+        const f = parseFloat(getComputedStyle(n).fontSize);
+        minFont = Math.min(minFont, f);
+        if (f < FONT_FLOOR) out.push(`TINY ${f}px "${n.textContent.trim().slice(0, 14)}"`);
+      }
+      // 4 · 轨道 / 填充 / 缺口对比度
+      const tracks = [];
+      stage.querySelectorAll('.bar,.band').forEach(n =>
+        tracks.push(['track-vs-bg', parse(getComputedStyle(n).backgroundColor), bgOf(n.parentElement)]));
+      stage.querySelectorAll('.bar>i,.band .used').forEach(n => {
+        const host = n.closest('.bar,.band');
+        const track = parse(getComputedStyle(host).backgroundColor);
+        const fill = parse(getComputedStyle(n).backgroundColor);
+        const lvl = (n.closest('[data-level]') || { dataset: {} }).dataset.level || 'ok';
+        tracks.push([`fill-vs-track/${lvl}`, fill, track]);
+        const notch = parse(getComputedStyle(n).boxShadow.match(/rgba?\([^)]+\)/)?.[0] || '');
+        if (notch.length) { tracks.push([`notch-vs-fill/${lvl}`, notch, fill]); tracks.push([`notch-vs-track/${lvl}`, notch, track]); }
+      });
+      stage.querySelectorAll('.band .caret').forEach(n => {
+        const track = parse(getComputedStyle(n.closest('.band')).backgroundColor);
+        tracks.push(['caret-vs-track', parse(getComputedStyle(n).backgroundColor), track]);
+      });
+      const seen = new Set(); const trackReport = [];
+      for (const [name, fg, bg] of tracks) {
+        if (!fg.length) continue;
+        const rr = ratio(over(fg, bg), bg);
+        const key = name + '|' + over(fg, bg).map(Math.round).join(',');
+        if (!seen.has(key)) { seen.add(key); trackReport.push([name, +rr.toFixed(2)]); }
+        if (name.startsWith('fill-vs-track')) continue;   // 边界由缺口承担，语义色不动
+        if (rr < 3) out.push(`TRACK<3:1 ${name} ${rr.toFixed(2)}:1`);
+      }
+      // 4b · R5-05 · 间距栅格：扫描全部计算出的 gap / padding / margin
+      const offScale = [];
+      for (const n of stage.querySelectorAll('*')) {
+        if (n.closest('.sr')) continue;
+        const cs = getComputedStyle(n);
+        for (const prop of ['rowGap','columnGap','paddingTop','paddingRight','paddingBottom',
+                            'paddingLeft','marginTop','marginRight','marginBottom','marginLeft']) {
+          const raw = cs[prop];
+          if (!raw || !raw.endsWith('px')) continue;
+          const val = Math.round(parseFloat(raw) * 100) / 100;
+          if (val < 0) continue;
+          if (!SCALE_IN.includes(val))
+            offScale.push(`${val}px ${prop} on .${(typeof n.className === 'string' ? n.className : n.tagName).split(' ')[0]}`);
+        }
+      }
+
+      // 4c · R5-01 · 非当前页里不得有任何可聚焦元素（inert 的实测口径）
+      let focusableHidden = 0;
+      for (const pg of stage.querySelectorAll('.page')) {
+        if (pg === live) continue;
+        focusableHidden += pg.querySelectorAll('button,a[href],input,select,textarea,[tabindex]:not([tabindex="-1"])')
+          .length && !pg.inert ? pg.querySelectorAll('button,a[href],input,select,textarea,[tabindex]:not([tabindex="-1"])').length : 0;
+      }
+
+      // 5 · accent：按计算颜色全量扫描，只数当前可见页
+      const ACCENT = 'rgb(244, 244, 246)';
+      const accentEls = [];
+      for (const n of stage.querySelectorAll('*')) {
+        if (n.closest('.sr') || n.hasAttribute('data-not-accent')) continue;
+        if (n.closest('svg[aria-hidden="true"]')) continue;
+        if (n.closest('.page') && n.closest('.page') !== live) continue;   // 非当前页不计
+        const b = n.getBoundingClientRect();
+        if (b.width < 0.5 || b.height < 0.5) continue;
+        const cs = getComputedStyle(n);
+        if (cs.visibility === 'hidden' || cs.display === 'none' || Number(cs.opacity) === 0) continue;
+        if (cs.backgroundColor === ACCENT || cs.stroke === ACCENT)
+          accentEls.push(typeof n.className === 'string' && n.className ? n.className : n.tagName);
+      }
+      return {
+        problems: out, accentEls, accent: accentEls.length, minFont,
+        offScale: [...new Set(offScale)], focusableHidden,
+        headings: stage.querySelectorAll('h1,h2,h3,[role=heading]').length,
+        statusEls: stage.querySelectorAll('[role="status"]').length,
+        clocks: [...stage.querySelectorAll('[data-clock]')].filter(n => n.getBoundingClientRect().height > 0 && n.textContent.trim()).length,
+        dots: [...document.querySelectorAll('#dots i')].map(n => n.dataset.on).join(''),
+        trackReport,
+      };
+    }, { FONT_FLOOR, SCALE_IN: SCALE });
+
+    if (r.accent > 2) r.problems.push(`ACCENT ${r.accent} > 2 [${r.accentEls.join(', ')}]`);
+    if (r.headings < 5) r.problems.push(`HEADINGS ${r.headings} < 5`);
+    if (s === 'loading' && r.statusEls < 1) r.problems.push('LOADING no role=status');
+    if (r.clocks < 1) r.problems.push('CLOCK missing');
+    // R5-01 · inert 断言
+    if (r.focusableHidden > 0) r.problems.push(`INERT 非当前页仍有 ${r.focusableHidden} 个可聚焦元素`);
+    // R5-05 · 例外清单断言：实测的 off-scale 集合必须等于声明的例外集合
+    const unexpected = r.offScale.filter(x => !SPACING_EXCEPTIONS.includes(x));
+    if (unexpected.length) r.problems.push(`OFF-SCALE 未登记: ${unexpected.join(' | ')}`);
+    if (r.problems.length) problems.push({ p, s, list: r.problems });
+    if (!trackReportOnce && r.trackReport.length) trackReportOnce = r.trackReport;
+    console.log(`${p.padEnd(4)}/${s.padEnd(9)} accent=${r.accent} minFont=${r.minFont} off=${r.offScale.length} inert=${r.focusableHidden === 0 ? 'ok' : 'FAIL'} h=${r.headings} status=${r.statusEls} clock=${r.clocks} dots=${r.dots} ${r.problems.length ? 'FAIL ' + r.problems.slice(0, 2).join(' | ') : 'ok'}`);
+  }
+}
+
+console.log('\n轨道 / 填充 / 缺口对比度:');
+for (const [n, v] of trackReportOnce || []) console.log(`  ${n.padEnd(22)} ${v}:1 ${v >= 3 ? 'PASS' : (n.startsWith('fill-vs-track') ? '(参考，边界由缺口承担)' : 'FAIL')}`);
+
+// ---------------- 截图 ----------------
+await page.click('#segState button[data-s="populated"]');
+for (const [p, name] of [['a', 'page-a'], ['b', 'page-b'], ['c', 'page-c']]) {
+  await page.click(`#segPage button[data-p="${p}"]`); await page.waitForTimeout(400);
+  await page.locator('#stage').screenshot({ path: `${SHOTS}/${name}.png` });
+}
+await page.click('#segState button[data-s="attention"]');
+await page.click('#segPage button[data-p="attn"]'); await page.waitForTimeout(400);
+await page.locator('#stage').screenshot({ path: `${SHOTS}/page-attention.png` });
+
+// ---------------- 节奏断言 ----------------
+console.log('\n节奏:');
+const rhythm = [];
+const dwell = await page.evaluate(() => {
+  const cs = getComputedStyle(document.documentElement);
+  const ms = n => { const v = cs.getPropertyValue(n).trim(); return v.endsWith('ms') ? parseFloat(v) : parseFloat(v) * 1000; };
+  return { a: ms('--dwell-a'), b: ms('--dwell-b'), c: ms('--dwell-c'), event: ms('--dwell-event') };
+});
+console.log('  tokens:', JSON.stringify(dwell));
+// 实机反馈 1：三页一律 60s，默认值必须是 60（下面的页序测试会临时压短，但那只是为了
+// 在几秒内观察机制，token 的默认值不能跟着改）
+if (!(dwell.a === 60000 && dwell.b === 60000 && dwell.c === 60000))
+  rhythm.push(`三页 dwell 默认值不是 60s（实测 ${dwell.a / 1000}/${dwell.b / 1000}/${dwell.c / 1000}）`);
+if (dwell.event !== dwell.c) rhythm.push('新事件钉住时长不等于一个 dwell');
+const hasIdle = await page.evaluate(() =>
+  getComputedStyle(document.documentElement).getPropertyValue('--dwell-idle').trim());
+if (hasIdle) rhythm.push('--dwell-idle 仍然存在（空闲加速已作废）');
+
+// 顺序 a→b→c→a（临时把停留压短，验证的是机制不是秒数）
+await page.click('#segState button[data-s="populated"]');
+await page.click('#segPage button[data-p="a"]');
+await page.addStyleTag({ content: ':root{--dwell-a:.4s;--dwell-b:.3s;--dwell-c:.3s;--dwell-event:.6s}' });
+await page.check('#chkRotate');
+const seqSeen = [];
+for (let i = 0; i < 24; i++) {
+  const cur = await page.evaluate(() => document.documentElement.dataset.page);
+  if (seqSeen[seqSeen.length - 1] !== cur) seqSeen.push(cur);
+  await page.waitForTimeout(120);
+}
+console.log('  观察到的页序:', seqSeen.join(' → '));
+if (!/a.*b.*c/.test(seqSeen.join(''))) rhythm.push(`页序不是 A→B→C（实测 ${seqSeen.join('→')}）`);
+
+// 新事件 → 200ms 内 C 页可见
+await page.click('#segPage button[data-p="a"]');
+await page.waitForTimeout(100);
+await page.click('#btnPush');
+await page.waitForTimeout(180);
+const onC = await page.evaluate(() => !!document.querySelector('.page[data-p="c"][data-on="1"]'));
+console.log('  新事件后 180ms 在 C 页:', onC);
+if (!onC) rhythm.push('新事件后 200ms 内没有切到 C 页');
+
+// attention → 轮播停住
+await page.click('#btnAttn');
+await page.waitForTimeout(1500);                       // ≫ 被压短后的任何一页停留
+const stuck = await page.evaluate(() => ({ page: document.documentElement.dataset.page, meter: document.getElementById('meter').textContent }));
+console.log('  attention 接管 1.5s 后:', JSON.stringify(stuck));
+if (stuck.page !== 'attn') rhythm.push('attention 下轮播没有停止');
+
+// 解除后回到 A
+await page.click('#btnAttn');
+await page.waitForTimeout(200);
+const back = await page.evaluate(() => document.documentElement.dataset.page);
+console.log('  解除 attention 后:', back);
+if (back !== 'a') rhythm.push('解除 attention 后没有回到 A 页');
+
+// reduced-motion 下切页无动画
+await page.check('#chkRm'); await page.waitForTimeout(150);
+const rmOk = await page.evaluate(() => {
+  const pg = document.querySelector('.page[data-on="1"]');
+  return { rm: document.documentElement.dataset.rm, transition: getComputedStyle(pg).transitionDuration, transform: getComputedStyle(pg).transform };
+});
+console.log('  reduced-motion:', JSON.stringify(rmOk));
+if (parseFloat(rmOk.transition) !== 0) rhythm.push('reduced-motion 下切页仍有 transition');
+await page.uncheck('#chkRm');
+
+// ---------------- 纯净模式 ----------------
+console.log('\n纯净模式:');
+const pure = [];
+await page.evaluate(() => document.exitFullscreen && document.fullscreenElement && document.exitFullscreen());
+await page.keyboard.press('p');
+await page.waitForTimeout(400);
+let st = await page.evaluate(() => ({
+  pure: document.documentElement.dataset.pure,
+  harness: getComputedStyle(document.querySelector('.harness')).display,
+  legend: getComputedStyle(document.querySelector('.legend')).display,
+  bodyBg: getComputedStyle(document.body).backgroundColor,
+  canvas: getComputedStyle(document.documentElement).getPropertyValue('--canvas').trim(),
+  rotate: document.documentElement.dataset.rotate,
+  dots: !!document.querySelector('#dots i[data-on="1"]'),
+  page: document.documentElement.dataset.page,
+}));
+console.log('  按 P 之后:', JSON.stringify(st));
+if (st.pure !== '1') pure.push('按 P 没有进入纯净模式');
+if (st.harness !== 'none' || st.legend !== 'none') pure.push('控制栏 / 说明没有隐藏');
+if (st.rotate !== '1') pure.push('纯净模式下轮播没有强制开启');
+if (!st.dots) pure.push('页面指示点丢失');
+
+await page.keyboard.press('Escape');
+await page.waitForTimeout(300);
+st = await page.evaluate(() => ({ pure: document.documentElement.dataset.pure,
+  harness: getComputedStyle(document.querySelector('.harness')).display }));
+console.log('  按 Esc 之后:', JSON.stringify(st));
+if (st.pure === '1' || st.harness === 'none') pure.push('Esc 没有退回调试视图');
+
+// ?pure=1 打开：先挂提示，按键后提示消失
+await page.goto(FILE + '?pure=1', { waitUntil: 'domcontentloaded' });
+await page.waitForTimeout(700);
+st = await page.evaluate(() => ({ pure: document.documentElement.dataset.pure,
+  hint: !document.getElementById('pureHint').hidden,
+  hintText: document.getElementById('pureHint').textContent,
+  hintSize: getComputedStyle(document.getElementById('pureHint')).fontSize,
+  harness: getComputedStyle(document.querySelector('.harness')).display }));
+console.log('  ?pure=1 打开:', JSON.stringify(st));
+if (st.pure !== '1' || st.harness !== 'none') pure.push('?pure=1 没有直接进入纯净模式');
+if (!st.hint) pure.push('?pure=1 没有显示「按任意键进入全屏」提示');
+if (st.hintSize !== '14px') pure.push(`提示不是 14px（实测 ${st.hintSize}）`);
+await page.keyboard.press('Space');
+await page.waitForTimeout(300);
+st = await page.evaluate(() => ({ hint: !document.getElementById('pureHint').hidden }));
+console.log('  按键之后提示:', JSON.stringify(st));
+if (st.hint) pure.push('按键后提示没有消失');
+// 纯净模式下键盘 ack 仍可用 —— 事件行只在 C 页，所以先把 dwell 压短等轮到 C
+// dwellUntil 是进入页面时按 60s 算好的，改 CSS 变量不会回溯它 ——
+// 按 P 出入一次纯净模式会触发 showPage 重新计时，新的短 dwell 才生效
+await page.addStyleTag({ content: ':root{--dwell-a:.3s;--dwell-b:.3s;--dwell-c:8s}' });
+await page.keyboard.press('p'); await page.waitForTimeout(120);
+await page.keyboard.press('p'); await page.waitForTimeout(120);
+for (let i = 0; i < 60 && await page.evaluate(() => document.documentElement.dataset.page) !== 'c'; i++)
+  await page.waitForTimeout(100);
+await page.keyboard.press('Tab');
+const acked = await page.evaluate(() => {
+  const a = document.activeElement;
+  return { page: document.documentElement.dataset.page, inStage: !!a.closest('#stage'),
+           cls: typeof a.className === 'string' ? a.className : a.tagName,
+           ring: getComputedStyle(a).boxShadow };
+});
+console.log('  纯净模式下 Tab 落点:', JSON.stringify(acked));
+if (!acked.inStage) pure.push('纯净模式下 Tab 进不到事件行');
+else {
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(250);
+  const live = await page.textContent('#live');
+  console.log('  纯净模式下 Enter ack:', JSON.stringify(live));
+  if (!/已读|读完/.test(live || '')) pure.push('纯净模式下 Enter 不能 ack');
+}
+
+console.log('\n纯净模式问题:', pure.length ? pure : 'none');
+console.log('\nconsole errors:', consoleErrors.length ? consoleErrors : 'none');
+console.log('节奏问题:', rhythm.length ? rhythm : 'none');
+console.log('布局问题:', problems.length ? JSON.stringify(problems, null, 1) : 'none');
+console.log('shots:', fs.readdirSync(SHOTS).filter(f => f.endsWith('.png')).join(' '));
+await browser.close();

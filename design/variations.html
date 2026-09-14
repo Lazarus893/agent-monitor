@@ -1,0 +1,1837 @@
+<!doctype html>
+<html lang="zh-CN" data-page="a" data-state="populated" data-rm="0" data-rotate="1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Monitor · M0 轮播版</title>
+
+<!--
+================================================================================
+AGENT MONITOR — M0 轮播版
+画布 480×270 CSS px，整体 zoom:2 铺满 960×540（1 画布 px = 4×4 物理像素 = 0.16 mm）
+视觉真源 DESIGN.md (raycast) · token 见 design/tokens.css（下方内联副本逐字相同）
+简报 design/brief-m0-rotation.md（在 brief-m0.md / brief-m0-35.md 之上的差量）
+前身：3.5 寸单屏版 design/variations-35-single.html · 960 版 design/variations-960x540.html
+================================================================================
+
+为什么轮播：一屏只回答一个问题，字号就能整体抬一档。整份 12/13px 全部废除，
+下限提到 14px，A 页的百分比从 48px 提到 64px、倒计时从 12px 提到 18px。
+代价是「扫一眼时想看的不在屏上」，所以三条必须同时成立：总览页回归得足够快
+（A 占一轮 22s 里的 10s）、事件能打断轮播（立刻跳 C 停 20s）、任何时刻看得出
+当前是第几页（右下角三点）。
+
+三个原变体不再互相竞争，各自成为一页 —— 上一轮「V1 还是 V3」那个取舍在这里消失了：
+A 页就是 V1 的内容，B 页就是 V3 的内容，V2 的弧作为 A 页的可选风格（默认关，本版未做）。
+
+PAGES
+  A 总览      还剩多少      三块瓦片横排：名 16px · 状态点 · 5h % 64px · 倒计时 18px
+                            7d 不显示。ZCode 的 Key 已进 Keychain，静止态是真实额度
+                            （5h 61%）；「未连接」退成 empty 态的一种
+  B 额度详情  够不够撑到重置 三条竖向时间带：名 · 判语 14px · 5h % 20px · 7d % 16px
+                            带高 12px · 「现在」游标 · 右端重置刻度 · 倒计时
+  C 事件      谁刚做完      最新 1 放大（标题 20px 单行）+ 3 行 16px；无计数文字
+  attention   谁在等我      整屏专用页：agent · 「等待你」28px · 说明 18px · 等了多久
+
+STATES —— 7 种状态仍然完整，每一页都要能渲染它们
+  populated / loading / empty / error / edge / attention / running
+
+节奏（tokens：--dwell-a/b/c/event）—— 实机反馈 1 后改为慢轮播
+  A 60s → B 60s → C 60s → A …（一轮 3 分钟）
+  「空闲加速」已作废：慢轮播之后回归不靠频率，靠打断
+  切页：横向滑动 300ms --ease-standard；reduced-motion 下直接切换，无动画
+
+打断（优先级从高到低）
+  1 attention  专用整屏页接管，轮播暂停，直到该状态消失（ack 或再点一次「模拟等待批准」）
+  2 新事件     立刻切到 C 页并停满一个 dwell（60s），新行从顶部推入，
+               期间再来一条重新计时，提示音一次
+  3 running    不打断，只在 A 页状态点脉冲、C 页顶部一行「进行中」
+  打断结束后从 A 页恢复
+
+纯净模式（副屏上还原最终效果）
+  ?pure=1 或按 P 进入：控制栏与说明全部隐藏，body 背景就是 --canvas，画布居中铺满视口，
+  同时请求 Fullscreen。?pure=1 打开时先挂一行 14px「按任意键进入全屏」——Fullscreen API
+  必须由用户手势触发。Esc 或再按 P 退出回调试视图。
+  纯净模式下轮播强制开、忽略 localStorage 的手动选页；键盘 ack 与指示点保留。
+
+INTERACTION
+  点击 / Enter / Space 事件行 = ack（attention 行 ack 即解除接管）
+  控制栏：页切换 / 自动轮播开关 / 7 状态 / 模拟新事件 / 模拟等待批准 / reduced-motion
+         + 当前页与剩余秒数（工具，不进画布）
+  localStorage 记住轮播开关与手动选中的页
+
+================================================================================
+自检
+================================================================================
+字号（brief-m0-rotation.md 的新表，覆盖 brief-m0-35.md 的下限）
+  [x] 任何文本 ≥14px —— Playwright 断言下限已同步改成 14
+  [x] 时钟 14px · A 页 % 64px · A 页名 16px · A 页倒计时 18px
+  [x] B 页 % 20px · 7d 16px · 判语 14px
+  [x] C 页最新标题 20px 单行省略号 · 其余 16px · 时间 14px
+  [x] attention 页「等待你」28px · 说明 18px
+  [x] 空态 / error 原因句 16px，一句话
+
+前两轮修复全部沿用，无一回退
+  [x] B1/R3-01/R4-02 轨道 --ash ≥3:1；三种填充末端一道 2px --canvas 缺口，
+      边界不再依赖填充色与轨道色的色差（danger 档原本只有 1.81:1）
+  [x] R3-03/R4-03 --quota-fill 降到 --charcoal，填充不再与 accent 同 hex
+  [x] R3-02/R4-04 V2 弧宽补偿 8px vs 4px（本版 V2 未上页，token 保留）
+  [x] R3-04/R4-05 foot 槽位恒占位，三块瓦片共基线
+  [x] R3-05 名字列固定宽 + 省略号，判语共享左边缘
+  [x] R3-06 间距全部回栅格，tokens.css §6 例外清单已重写成真实集合
+  [x] R3-07/R4-13 骨架提到 --stone；可见的「读取中」只留一处，其余转 sr-only
+  [x] R3-09/Q5 事件区 sr-only 标题按状态改写
+  [x] R4-12 % 归主数字 · R4-16 未读点回 6px
+  [x] R5-12 · A 页 foot 不靠省略号：它是定宽 flex 容器，倒计时 18px + 状态词 14px
+      两档字号已经把长度控死（最长 105px < 133px 内宽），text-overflow 对 flex 项
+      本来也不生效。这里改的是声明而不是实现——两边不一致本身才是缺陷。
+  [x] R4-01 任何页都不出现 cwd
+  [x] R4-07 倒计时在同一块瓦片里不印两遍
+  [x] R4-17 判语只留结论「按这个速度用不完 / 会提前用尽」
+  [x] B2/B3/B4 role=status · heading ≥5 · aria-label 含 kind
+  [x] Q1 Codex 身份色 --charcoal · Q4 :active · Q6 中文字距 · Q7 边框 --ash
+  [x] P2 跨阈值播报 · P3 breathe 用 opacity 叠层
+
+R5 这一轮
+  [x] R5-01 非当前页 inert，隐藏页的事件行同时退出 Tab 序与无障碍树（断言：可聚焦数 = 0）
+  [x] R5-02 重置刻度改出头刻痕（落在带外 --surface 上 7.09:1），不再靠 1.95:1 的色差
+  [x] R5-03 B 页 error/empty 回到两行，「下一步」不再被单行省略号截掉
+  [x] R5-04 C 页时间列 58 → 68px，「29 分钟前」不再撞图标
+  [x] R5-05 间距例外清单改成断言：运行时扫描全部 gap/padding/margin 比对栅格，
+      实测 off-scale 集合为空，tokens.css §6 已据此重写
+  [x] R5-06 未读行与 attention 行补 hover（hover 规则排到属性规则之后）
+  [x] R5-07 顶栏承载「读取中」，A/B 页 loading 不再一个字都没有
+  [x] R5-08 B 页名字列 min-width:112px + 内层 span，省略号这回真的通电了
+  [x] R5-09 A 页 msg 态三块共基线 · R5-11 100% 不降档 · R5-13 手动切页 10s 宽限
+  [x] R5-14 data-rotate 同步 · R5-15 「下一步」不跟着变红 · R5-18 chip 行盒放开
+  [x] R5-20 attention 页兑现一处 accent（真实元素，断言看得见）
+  [x] R3-16（lead 拍板）A/B 页时钟旁「16:32 · 2」，14px --mute，未读 >0 才出现
+
+accent
+  [x] ≤2，且计数改成按计算颜色全量扫描（不再用选择器白名单）
+  [x] 右下角三点指示器带 data-not-accent —— 简报明确写了「这不算 accent」
+================================================================================
+-->
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+/* ==========================================================================
+   design/tokens.css —— 内联副本（由构建步骤逐字拼入，不手工同步）
+   ========================================================================== */
+/* =============================================================================
+   Agent Monitor — design tokens
+   Layer 1  extracted verbatim from DESIGN.md (raycast) via design-system-extract
+   Layer 2  project layer for the 960×540 @2x secondary display
+   Naming is by PURPOSE, not by hue. Findings are at the bottom of this file.
+   ========================================================================== */
+
+:root {
+  /* ==========================================================================
+     1 · SURFACE LADDER — extracted (DESIGN.md › Colors › Surface)
+     Elevation in this system is a background-color ladder, never a shadow.
+     Each notch lighter reads as one step closer to the viewer.
+     ====================================================================== */
+  --canvas:            #07080a;  /* page ground, the dominant surface        */
+  --surface:           #0d0d0d;  /* card / panel — one notch above canvas    */
+  --surface-elevated:  #101111;  /* input fill, inactive track, active chip  */
+  --surface-card:      #121212;  /* top notch — unread row, keycap, hover    */
+
+  /* ==========================================================================
+     2 · HAIRLINES — extracted (DESIGN.md › Elevation & Depth)
+     ====================================================================== */
+  --hairline:          #242728;               /* universal 1px card edge     */
+  --hairline-soft:     rgba(255,255,255,.08); /* over-image / translucent    */
+  --hairline-strong:   rgba(255,255,255,.16); /* stronger inline divider     */
+
+  /* ==========================================================================
+     3 · TEXT — extracted (DESIGN.md › Colors › Text)
+     Contrast measured against --surface #0d0d0d (worst realistic case here):
+       ink 17.69:1 · charcoal 12.99:1 · body 12.23:1 · mute 7.09:1
+       ash 3.64:1  · stone 1.97:1
+     ====================================================================== */
+  --ink:               #f4f4f6;  /* headline / primary numerals             */
+  --charcoal:          #d3d3d4;  /* body where ink reads too soft           */
+  --body:              #cdcdcd;  /* default running text, bar fills         */
+  --mute:              #9c9c9d;  /* metadata, labels, timestamps  (≥12px ok)*/
+  --ash:               #6a6b6c;  /* 3.64:1 — NON-INFORMATIONAL MARKS ONLY   */
+  --stone:             #434345;  /* 1.97:1 — never text; inactive track only*/
+
+  /* ==========================================================================
+     4 · SEMANTIC — extracted (DESIGN.md › Colors › Semantic)
+     raycast scopes these to illustrations; this project promotes them to
+     quota thresholds only (see §7). They are NOT accent.
+     ====================================================================== */
+  --ok:                #59d499;
+  --warn:              #ffc533;
+  --danger:            #ff6161;
+  --info:              #57c1ff;
+  --ok-soft:           rgba(89,212,153,.15);
+  --warn-soft:         rgba(255,197,51,.15);
+  --danger-soft:       rgba(255,97,97,.15);
+
+  /* ==========================================================================
+     5 · ACCENT — extracted (DESIGN.md: "white IS the brand action")
+     The only true accent in the system. In this project it is rationed to
+     「未读 / 需要你」 and capped at 2 visible uses per screen.
+     ====================================================================== */
+  --accent:            #f4f4f6;
+  --accent-dim:        rgba(244,244,246,.55);  /* aged unread — see §7       */
+
+  /* ==========================================================================
+     6 · RADIUS + SPACING — extracted (DESIGN.md › Shapes / Layout)
+     ====================================================================== */
+  --r-xs: 4px;  --r-sm: 6px;  --r-md: 8px;  --r-lg: 10px;  --r-full: 9999px;
+
+  --sp-xxs: 2px; --sp-xs: 4px; --sp-sm: 8px;  --sp-md: 12px;
+  --sp-lg: 16px; --sp-xl: 24px; --sp-xxl: 32px;
+
+  /* SPACING EXCEPTIONS — 第三次重写（R5-05）。前两版都与实现失配，所以这次不再
+     手写清单，而是把它做成断言：design/verify.mjs 每格都会扫描 stage 内全部计算出的
+     gap / rowGap / columnGap / padding* / margin*，凡不落在上面这条标度上的一律报错。
+     **当前实测集合为空**——轮播版里没有任何 off-scale 的间距。
+     两条随之而来的纪律：
+       · 不用 margin:auto 做分布。getComputedStyle 会把它解析成一个巨大的 used value
+         （实测 371.58px），在这条断言里读起来像野值；改用显式的 grid-column。
+       · --dot 6px / --quota-notch-w 2px / caret 2px 是**尺寸**不是间距，不在扫描范围内，
+         它们的理由写在 §12 各自的 token 注释里。
+     清单要是再和实现对不上，那是断言坏了，不是清单旧了。 */
+
+  /* ==========================================================================
+     7 · PROJECT · IDENTITY COLORS  (added — DESIGN.md has no multi-brand slot)
+     Categorical, not accent. Allowed on badges, dots and the V2 progress arc.
+     Never on a fill wider than the arc stroke.
+     ZCode is 智谱 #3b6cff re-plotted in OKLCH at Claude's exact L and C so no
+     agent out-shouts another:  L .6724  C .1308  H 265.6  →  #6f93e6
+     Measured on --surface: claude 6.23:1 · zcode 6.47:1 · codex 12.99:1
+
+     REVISION 1 (lead, post-review · R1-01 / R1-03 / R2-11): Codex was #f4f4f6,
+     the same hex as --accent, so every Codex dot counted as a visual accent and
+     the attention state showed three equal-brightness white marks. Demoted to
+     --charcoal, still neutral-white, half a step below accent. This also gives
+     --charcoal a job (it was the one extracted-but-unused token, R1-08).
+     ====================================================================== */
+  --id-codex:          var(--charcoal);   /* #d3d3d4 */
+  --id-claude:         #d97757;
+  --id-zcode:          #6f93e6;
+
+  /* ==========================================================================
+     8 · PROJECT · QUOTA THRESHOLDS (added)
+     ====================================================================== */
+  --quota-normal:      var(--body);
+  --quota-warn:        var(--warn);   /* ≥80% */
+  --quota-danger:      var(--danger); /* ≥95% */
+  /* REVISION 2 (lead, post-review · R1-02 / R2-01 / R2-08): every track-shaped
+     graphic (V1 bar track, V2 gauge arc track, V3 band track, V3 timeline nodes)
+     moves to --ash. --hairline measured 1.29:1 and --stone 1.97:1 against
+     --surface; WCAG 1.4.11 puts a hard 3:1 floor on non-text UI components that
+     carry information, and a track carries "how long is the whole thing".
+     --ash is 3.64:1 on --surface and 3.75:1 on --canvas. The fills that ride on
+     these tracks move to --ink so the fill edge keeps a 4.86:1 boundary. */
+  --quota-track:       var(--ash);
+  /* REVISION 4 (R3-03 / R4-03): the fill was --ink — the same hex as --accent.
+     Measured in V3's populated state the two fills covered 1768 px² while the
+     unread dot covered 25 px²: a 70:1 ratio, i.e. the brightest, largest shape
+     on the screen was quota, not "someone needs you". Accent only works because
+     it is scarce. Demoted to --charcoal: 3.57:1 against the --ash track, still
+     over the 3:1 floor, and half a step below accent — the same move Q1 made on
+     --id-codex, so the system stays self-consistent. */
+  --quota-fill:        var(--charcoal);
+  /* REVISION 4 (R3-01 / R3-02 / R4-02 / R4-04): every fill now ends in a 2px
+     --canvas notch, the same mechanism as V3's "now" caret. Raising the track to
+     --ash fixed track-vs-background but broke fill-vs-track in the danger tier
+     (--danger on --ash measured 1.81:1). Colour cannot carry that boundary
+     across three semantic tiers, so shape does: the notch measures 18.24:1 on
+     ink, 13.39 on charcoal, 12.68 on warn, 6.81 on danger and 3.75 on the bare
+     track — constant and tier-independent. Semantic red/yellow are untouched. */
+  --quota-notch:       var(--canvas);
+  --quota-notch-w:     2px;
+  --quota-warn-at:     80;
+  --quota-danger-at:   95;
+
+  /* ==========================================================================
+     9 · TYPOGRAPHY FAMILIES
+     Inter extracted from DESIGN.md, ss03 mandatory ("without it the chrome
+     loses its signature voice"). IBM Plex Mono added for numerals only —
+     the single deliberate deviation, justified in 00-designer-notes.md.
+     ====================================================================== */
+  --font-sans: "Inter", "Inter Fallback", -apple-system, BlinkMacSystemFont,
+               "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+               "Microsoft YaHei", system-ui, sans-serif;
+  --font-num:  "IBM Plex Mono", ui-monospace, SFMono-Regular, "SF Mono",
+               Menlo, Consolas, "Liberation Mono", monospace;
+  --font-features: "calt" 1, "kern" 1, "liga" 1, "ss03" 1;
+  --num-features: "tnum" 1, "zero" 1;   /* tabular figures + slashed zero    */
+
+  /* ==========================================================================
+     10 · PROJECT · TYPE SCALE for the 480×270 canvas (zoom 2 → 960×540)
+     REVISION 3 (3.5" panel, brief-m0-35.md). The panel measured 3.5 inches,
+     not 7: 1920×1080 physical on a 3.5" diagonal is ~629 ppi, so one canvas
+     CSS px (= 4×4 physical px after zoom 2) is 0.16 mm — about 0.6× the
+     0.26 mm of a px on an ordinary desktop monitor. The user compared 1x /
+     1.5x / 2x on the real panel and picked 2x.
+     Consequence: the scale is NOT the 960 scale halved. It is re-cut around
+     the fact that only the big numeral and one enlarged title are readable
+     from a seat 50–60 cm away; everything else is "recognisable at a glance".
+     The 960×540 scale is preserved in design/variations-960x540.html.
+     Seven steps, all used, 12px hard floor —— 轮播版已由 §14 覆盖到 14px，见下方
+     §14；这一段保留的是 3.5 寸单屏版（design/variations-35-single.html）的记录。
+     ====================================================================== */
+  /* R4-09 — 给之后复用这份 token 的 Electron 渲染层：在 0.16 mm/px 的这块屏上，
+     12 / 13 / 14 三档的 modular step 是 1.08×，物理差 0.16 mm ≈ 1 弧分，低于分辨阈，
+     **它们是同一个视觉档**。三者的层级区分完全由 --ink / --body / --mute 与位置承担，
+     调 1px 字号调不出层级。真正起作用的只有三档：12–14 元数据 / 16–18 标题 /
+     44–48 主数字。轮播版按 brief-m0-rotation.md 的新表把下限整体抬到 14px。 */
+  --fs-micro:   12px;  /* floor — clock, status label, reason line, verdict  */
+  --fs-label:   13px;  /* agent name, empty / error headline                 */
+  --fs-unit:    14px;  /* percent sign suffix, second event row              */
+  --fs-num-sm:  16px;  /* V3's demoted percentage                            */
+  --fs-lead:    18px;  /* latest event title (brief floor is 16px)           */
+  --fs-num-v2:  44px;  /* V2 primary numeral, beside the 56px arc           */
+  --fs-num:     48px;  /* V1 primary numeral                                 */
+
+  --lh-tight:  1.08;   /* numerals                                           */
+  --lh-snug:   1.3;    /* headings, single-line rows                         */
+  --lh-normal: 1.5;    /* running text                                       */
+
+  --w-read:    400;
+  --w-emph:    500;
+  --w-announce:600;
+
+  /* letter-spacing — the ALL-CAPS floor of 0.06em is a hard gate            */
+  --tr-caps:   .08em;
+  --tr-small:  .01em;  /* 12–13px                                            */
+  --tr-body:   0;
+  --tr-num:    -.02em; /* 48px numerals need negative tracking               */
+
+  /* ==========================================================================
+     11 · PROJECT · MOTION (added — DESIGN.md documents no motion at all)
+     Motion is reserved for state change. Everything below is stripped under
+     prefers-reduced-motion; only the instant switch survives.
+     ====================================================================== */
+  --dur-instant:  120ms;  /* hover / press                                   */
+  --dur-state:    180ms;  /* state confirmation — the 150ms convergence      */
+  --dur-bar:      300ms;  /* quota bar / arc advance                         */
+  --dur-event:    360ms;  /* new event push-in (brief ceiling 400ms)         */
+  --ease-standard: cubic-bezier(.2, 0, 0, 1);   /* M3 standard, front-loaded */
+  --ease-exit:     cubic-bezier(.4, 0, 1, 1);
+  --cycle-pulse:   2s;    /* running — agent badge                           */
+  --cycle-breathe: 3s;    /* attention — brightness delta ≤8%                */
+
+  /* ==========================================================================
+     14 · PROJECT · ROTATION LAYER (brief-m0-rotation.md)
+     一屏只回答一个问题，字号就能整体抬一档。这一层覆盖 §10 的下限：
+     任何文本 ≥14px（12 / 13px 全部废除，依据 04-verify-hierarchy-35.md 的物理
+     可读性推算：0.16 mm/px @ 55 cm 下 12px CJK 落在「认不出」区）。
+     §10 那张表保留作 3.5 寸单屏版的记录，见 design/variations-35-single.html。
+     ====================================================================== */
+  --fs-min:      14px;  /* 硬下限 — 时钟、事件时间、B 页判语、原因句        */
+  --fs-body-r:   16px;  /* A 页 agent 名、C 页次级标题、空/错原因句         */
+  --fs-cd-a:     18px;  /* A 页倒计时 — 12px 分不清 2h22m 与 2h26m          */
+  --fs-num-b:    20px;  /* B 页 5h 百分比                                   */
+  --fs-lead-r:   20px;  /* C 页最新事件标题                                 */
+  --fs-unit-r:   20px;  /* A 页百分号后缀                                   */
+  --fs-attn-lead:28px;  /* attention 页「等待你」（简报底线 24）            */
+  --fs-attn-body:18px;  /* attention 页说明句                               */
+  --fs-num-a:    64px;  /* A 页 5h 百分比（简报底线 64）                     */
+
+  /* 节奏 —— REVISION 5（用户 2026-09-14 实机反馈：原 10/6/6 s 太快）。
+     三页一律 60 s，一轮 3 分钟。原来的设计假设是「靠快速回归 A 页来补偿
+     『想看的不在屏上』」，实机否掉了这个假设：在副屏上人是余光扫，不是盯着等，
+     页太快反而每一眼都撞在切换动画上。改成慢轮播之后，回归靠的不再是频率而是
+     **打断**——新事件与 attention 会主动把该看的推到眼前，定时轮播只负责兜底。
+     「空闲加速」也随之作废：既然不靠频率回归，空闲时缩短停留就没有意义了。 */
+  --dwell-a:      60s;
+  --dwell-b:      60s;
+  --dwell-c:      60s;
+  --dwell-event:  60s;  /* 新事件跳 C 后停满一个 dwell，再来一条重新计时     */
+  --dur-page:    300ms; /* 横向滑动切页                                     */
+
+  /* ==========================================================================
+     12 · PROJECT · GEOMETRY — 480×270 canvas, rendered at zoom 2
+     REVISION 3. The canvas is authored at 480×270 and the whole stage carries
+     zoom: 2, so it fills the panel's 960×540 logical resolution 1:1 and no
+     layout is "shrunk to fit". Screenshots still come out 960×540 @2x.
+     ====================================================================== */
+  --screen-w:   480px;
+  --screen-h:   270px;
+  --screen-zoom: 2;
+  --pad-screen: 8px;
+  --gap-tile:   8px;
+  --gap-block:  8px;
+  --h-topbar:   16px;   /* clock only — the wordmark is cut on this canvas   */
+  --h-tile:     137px;  /* V1 / V2 quota tile                                */
+  --h-band:     48px;   /* V3 stacked time band                              */
+  --h-row-lead: 44px;   /* enlarged latest event (V3 uses 64px, two lines)   */
+  --h-row:      32px;   /* second event row — brief floor is 28px            */
+  --gauge:      60px;   /* V2 arc, brief range 56–64px                       */
+  /* R3-02 / R4-04: the progress arc is 4px wider than the track — 2px per side
+     = 0.32 mm ≈ 2 arc-minutes at 55 cm, above the ~1 arc-minute resolution
+     limit. The previous 1px total (0.5px/side ≈ 0.5 arc-minutes) was below it,
+     so the identity-coloured arc had no usable separation from the track
+     (Claude 1.71:1, ZCode 1.78:1 by luminance alone). */
+  --arc-stroke: 8px;    /* progress arc                                      */
+  --arc-track:  4px;    /* gauge track                                       */
+  --arc-sweep:  270;    /* degrees, opening faces down                       */
+  --dot:        6px;    /* unread / attention mark — R4-16: back to 6px       */
+}
+
+/* ============================================================================
+   FINDINGS — design-system-extract Phase 4
+   ============================================================================
+
+   SOURCES USED
+   · DESIGN.md (raycast, 2026-09-14 copy) — front-matter token block plus the
+     Colors / Typography / Layout / Elevation & Depth / Shapes / Components /
+     Do's and Don'ts prose sections.
+   · PLAN.md §3.2 / §3.5 for the project-layer decisions.
+   · design/fixtures/quota.json + events.json for the values the scale must
+     actually hold (48px "97%" and a 64-character CJK title were the two
+     sizing constraints that mattered).
+
+   EXTRACTED VERBATIM
+   Surface ladder (4 steps) · 3 hairlines · 8 text colors · 4 semantic colors
+   + their soft variants · radius scale · spacing scale · Inter with the full
+   font-feature-settings string. No value in §1–§6 and §9's Inter stack was
+   invented; every hex traces to a line in DESIGN.md.
+
+   GAPS IN DESIGN.md — filled here, flagged for review
+   1. No multi-brand / categorical color slot. raycast has exactly one brand
+      action (white) and treats saturated color as illustration-only. A
+      three-agent monitor needs three peer identities, so §7 is net-new. It is
+      scoped to marks, never to fills, so the "no saturated color on chrome"
+      rule survives in spirit.
+   2. No motion tokens at all — §11 is net-new.
+   3. No monospace face. DESIGN.md names JetBrains Mono / Geist Mono only as
+      substitutes for inline code chips. §9 promotes IBM Plex Mono to the
+      numeric tier; rationale in design/review/00-designer-notes.md.
+   4. No dashboard type scale. The extracted scale tops out at 64px display
+      and bottoms at 12px caption — both tuned for a marketing page at desk
+      distance. §10 re-cuts it for a 7" panel at arm's length.
+   5. No disabled / loading / empty / error component states, and no hover
+      states by stated system policy ("No hover states documented"). All five
+      states are project-defined in variations.html.
+   6. No focus token. DESIGN.md's only focus treatment is text-input-focused,
+      which brightens the border to --hairline-strong. Measured, that is
+      1.56:1 against --surface — it fails WCAG 1.4.11's 3:1 floor for a focus
+      indicator. This project uses a 2px --ink ring instead (17.05:1 on
+      --surface-card). This is a correction, not a preference.
+
+   INCONSISTENCIES WORTH KNOWING
+   · Three near-identical light neutrals — ink #f4f4f6, charcoal #d3d3d4,
+     body #cdcdcd — separated by under 1 point of contrast. Kept as extracted.
+     charcoal is NOT dead weight any more: REVISION 1 gave it the Codex identity
+     and REVISION 4 gave it every quota fill — sitting half a step below ink is
+     exactly what keeps both of them out of the accent budget.
+   · --ash #6a6b6c is documented for "disabled-state text" yet measures
+     3.64:1 on --surface. That clears 3:1 for non-text and large text but
+     fails the 4.5:1 body floor. The brief permits it at ≥18px; this project
+     is stricter and uses it for non-informational marks only (axis ticks,
+     inactive glyphs), with --mute (7.09:1) carrying every piece of small
+     metadata that means something.
+   · DESIGN.md's own "Don't" list forbids saturated accents on chrome or
+     text, while its Semantic section defines them as error/success/warning
+     colors. The contradiction is resolved here by §4's scope note: semantic
+     color appears only on quota thresholds, where it is the information.
+   · --hero-stripe gradient and --key-bg gradient were deliberately NOT
+     extracted. The brief bans gradients outright and this surface has no
+     hero.
+
+   RECOMMENDED NEXT STEPS
+   Review §7 (identity trio) and §10 (type scale) — they are the two layers
+   that are project judgement rather than extraction. Then reuse this file
+   unchanged in the Electron renderer; nothing here depends on the prototype.
+   ========================================================================= */
+</style>
+
+<style>
+/* ==========================================================================
+   HARNESS —— 纯工具样式，不参与设计
+   ========================================================================== */
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:#303236;color:#c9ccd1;
+  font:13px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;
+  display:flex;flex-direction:column;align-items:center;gap:14px;
+  padding:20px 16px 28px;min-height:100vh}
+.harness{width:960px;display:flex;flex-wrap:wrap;align-items:center;gap:8px 18px}
+.hgroup{display:flex;align-items:center;gap:6px}
+.hgroup>b{font-weight:600;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#8b8f96;margin-right:2px}
+.seg{display:flex;background:#25272a;border:1px solid #3c3f44;border-radius:6px;overflow:hidden}
+.seg button{appearance:none;border:0;background:transparent;color:#c9ccd1;
+  font:12px/1 system-ui,sans-serif;padding:7px 10px;cursor:pointer;border-right:1px solid #3c3f44}
+.seg button:last-child{border-right:0}
+.seg button:hover{background:#2e3134}
+.seg button[aria-pressed="true"]{background:#4a4e55;color:#fff}
+.seg button:focus-visible{outline:2px solid #8ab4ff;outline-offset:-2px}
+.hbtn{appearance:none;border:1px solid #3c3f44;background:#25272a;color:#e6e8ea;
+  font:12px/1 system-ui,sans-serif;padding:7px 12px;border-radius:6px;cursor:pointer}
+.hbtn:hover{background:#2e3134}
+.hbtn:focus-visible{outline:2px solid #8ab4ff;outline-offset:1px}
+.hcheck{display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;user-select:none}
+.hcheck input{accent-color:#8ab4ff;width:14px;height:14px;cursor:pointer}
+.hmeter{font:12px/1 ui-monospace,SFMono-Regular,Menlo,monospace;color:#8ab4ff;
+  background:#25272a;border:1px solid #3c3f44;border-radius:6px;padding:7px 10px;min-width:190px}
+.legend{width:960px;color:#9aa0a8;font-size:12px;line-height:1.65;margin:0}
+.legend b{color:#e6e8ea;font-weight:600}
+.stage-wrap{width:960px;height:540px;position:relative}
+
+/* ==========================================================================
+   纯净模式 —— 副屏上还原最终效果：只剩画布
+   标签栏 / 地址栏 / 控制栏都会破坏副屏观感，所以这里把它们全部拿掉，
+   body 背景直接就是 --canvas，画布居中铺满视口。
+   ========================================================================== */
+.pure-hint{margin:0;font-size:14px;color:#9aa0a8;letter-spacing:.02em}
+.pure-hint[hidden]{display:none}
+html[data-pure="1"] body{background:var(--canvas);gap:0;padding:0;justify-content:center}
+html[data-pure="1"] .harness,
+html[data-pure="1"] .legend{display:none}
+html[data-pure="1"] .stage{box-shadow:none;border-radius:0}
+html[data-pure="1"] .pure-hint{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);
+  color:var(--mute);font-family:var(--font-sans);z-index:2}
+.stage{width:var(--screen-w);height:var(--screen-h);zoom:var(--screen-zoom);
+  background:var(--canvas);position:relative;overflow:hidden;border-radius:1px;
+  box-shadow:0 0 0 .5px #3c3f44;
+  font-family:var(--font-sans);font-feature-settings:var(--font-features);
+  color:var(--body);-webkit-font-smoothing:antialiased}
+</style>
+
+<style>
+/* ==========================================================================
+   STAGE —— 画布坐标 480×270
+   ========================================================================== */
+.screen{position:absolute;inset:var(--pad-screen);display:flex;flex-direction:column}
+.stage :where(h1,h2){margin:0;font:inherit;letter-spacing:inherit;color:inherit}
+.sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;
+  overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* 顶栏用显式的两列栅格而不是 margin:auto —— auto margin 会被 getComputedStyle
+   解析成一个巨大的 used value（实测 371.58px），在「间距必须落在栅格上」这条
+   断言里读起来像一个野值。用 grid-column 定位，语义也更准：左槽是状态，右槽是时钟。 */
+.topbar{height:var(--h-topbar);flex:none;display:grid;grid-template-columns:1fr auto;
+  align-items:center;column-gap:var(--sp-sm)}
+.topbar #topLoading{grid-column:1;justify-self:start}
+.topbar #topLoading[hidden]{display:none}
+.topbar .tb-right{grid-column:2;justify-self:end;display:flex;align-items:baseline;gap:var(--sp-xs)}
+/* R3-16（lead 拍板）· 未读数并进时钟那一行，只在 A / B 页且未读 >0 时出现。
+   --mute 不是 accent 色，不计入 ≤2；C 页不显示，那里行本身已经在表达。 */
+.unread{font-family:var(--font-num);font-feature-settings:var(--num-features);
+  font-variant-numeric:tabular-nums;font-size:var(--fs-min);color:var(--mute);line-height:1}
+.unread:empty{display:none}
+.clock{font-family:var(--font-num);font-feature-settings:var(--num-features);
+  font-variant-numeric:tabular-nums;font-size:var(--fs-min);font-weight:var(--w-emph);color:var(--mute);line-height:1}
+
+/* ---- 页容器：横向滑动切页 ---- */
+.pages{flex:1;min-height:0;margin-top:var(--gap-block);position:relative;overflow:hidden}
+.page{position:absolute;inset:0;padding-bottom:12px;display:flex;flex-direction:column;
+  opacity:0;pointer-events:none;transform:translateX(-24px);
+  transition:opacity var(--dur-page) var(--ease-standard),transform var(--dur-page) var(--ease-standard)}
+.page[data-on="1"]{opacity:1;pointer-events:auto;transform:none}
+
+/* ---- 页指示：右下角三点。简报明确写了这不算 accent ---- */
+.dots{position:absolute;right:0;bottom:0;display:flex;gap:var(--sp-xs);align-items:center}
+.dots i{width:4px;height:4px;border-radius:var(--r-full);background:var(--ash);display:block;
+  transition:background var(--dur-state) var(--ease-standard)}
+.dots i[data-on="1"]{background:var(--ink)}
+
+/* ---- 共用：瓦片 / 状态点 / 数字 / 轨道 ---- */
+.tile{background:var(--surface);border:1px solid var(--hairline);border-radius:var(--r-md);
+  display:flex;flex-direction:column;min-width:0;position:relative;
+  transition:background var(--dur-state) var(--ease-standard)}
+.tile-name{font-weight:var(--w-emph);color:var(--ink);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;line-height:1.2}
+.iddot{width:var(--dot);height:var(--dot);border-radius:var(--r-full);background:var(--idc);flex:none}
+.iddot[data-off="1"]{background:var(--ash)}
+.tile[data-status="running"] .iddot{animation:pulse var(--cycle-pulse) var(--ease-standard) infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.tile[data-status="attention"]{background:var(--surface-elevated)}
+.tile[data-status="attention"]::before,
+.row[data-kind="attention"]::before,
+.attn-card::before{content:"";position:absolute;inset:0;border-radius:inherit;background:var(--ink);
+  opacity:0;pointer-events:none;animation:breathe var(--cycle-breathe) ease-in-out infinite}
+@keyframes breathe{0%,100%{opacity:0}50%{opacity:.06}}
+.tile[data-status="attention"] .iddot{background:var(--accent);box-shadow:0 0 0 2px rgba(244,244,246,.14)}
+
+.num{font-family:var(--font-num);font-feature-settings:var(--num-features);
+  font-variant-numeric:tabular-nums;font-weight:var(--w-emph);color:var(--ink);
+  line-height:1.05;letter-spacing:var(--tr-num)}
+.unit{font-family:var(--font-num);font-weight:var(--w-emph);color:var(--body);line-height:1}
+.mono{font-family:var(--font-num);font-feature-settings:var(--num-features);
+  font-variant-numeric:tabular-nums;line-height:1}
+[data-level="warn"]   .num,[data-level="warn"]   .unit{color:var(--quota-warn)}
+[data-level="danger"] .num,[data-level="danger"] .unit{color:var(--quota-danger)}
+
+/* 轨道 --ash 3.64:1；填充 --charcoal 3.57:1；末端一道 2px --canvas 缺口 */
+.bar{background:var(--quota-track);border-radius:var(--r-full);overflow:hidden;flex:none}
+.bar>i{display:block;height:100%;background:var(--quota-fill);border-radius:var(--r-full);
+  box-shadow:var(--quota-notch-w) 0 0 var(--quota-notch);
+  transition:width var(--dur-bar) var(--ease-standard)}
+.bar[data-level="warn"]>i{background:var(--quota-warn)}
+.bar[data-level="danger"]>i{background:var(--quota-danger)}
+
+/* ---- 五态消息块 ---- */
+/* R5-09 · msg 态原来按各自内容垂直居中，行数不同就不共基线（实测最大差 19px）。
+   改 flex-start，三块的第一行文字对齐——居中留给单块独立出现的场合。 */
+.msg{flex:1;display:flex;flex-direction:column;justify-content:flex-start;gap:var(--sp-xs);min-width:0}
+.page-a .msg{padding-top:var(--sp-md)}
+.msg-head{display:flex;align-items:center;gap:var(--sp-xs);color:var(--ink);
+  font-size:var(--fs-body-r);font-weight:var(--w-emph);line-height:1.2}
+.msg-head svg{flex:none;color:var(--mute)}
+.msg[data-tone="error"] .msg-head svg{color:var(--danger)}
+.msg p{margin:0;font-size:var(--fs-min);line-height:1.35;color:var(--mute);
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.skel{display:flex;flex-direction:column;gap:var(--sp-sm);flex:1;justify-content:center}
+.skel i{display:block;background:var(--stone);border-radius:var(--r-xs)}
+.loading-label{font-size:var(--fs-min);letter-spacing:var(--tr-small);color:var(--mute);font-weight:var(--w-emph)}
+
+/* ==========================================================================
+   A 页 · 总览
+   ========================================================================== */
+.page-a .tiles{flex:1;display:grid;grid-template-columns:repeat(3,1fr);gap:var(--gap-tile);min-height:0}
+.page-a .tile{padding:var(--sp-sm);gap:var(--sp-sm)}
+.page-a .tile-head{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-xs);flex:none;height:20px}
+.page-a .tile-name{font-size:var(--fs-body-r)}
+.page-a .a-body{flex:1;display:flex;flex-direction:column;justify-content:center;gap:var(--sp-md);min-width:0}
+.page-a .a-nums{display:flex;align-items:baseline;gap:2px;min-width:0}
+.page-a .a-nums .num{font-size:var(--fs-num-a)}
+/* R5-11 · 原来三位数降到 48px，低于 A 页 ≥64px 的下限，而「额度用尽」恰恰最该喊出来。
+   实测 64px 三位数约 111px < 133px 内宽，放得下——不降档，改藏掉此时冗余的 %。 */
+.page-a .a-nums[data-wide="1"] .unit{display:none}
+.page-a .a-nums .unit{font-size:var(--fs-unit-r)}
+/* 倒计时 18px（R4-06 点名要提上来），状态词 14px —— 两者分档才在 123px 的瓦片
+   内宽里放得下，也让「数字」与「说明」不再是同一个视觉层 */
+.page-a .tile-foot{flex:none;height:24px;display:flex;align-items:baseline;gap:var(--sp-xs);
+  color:var(--mute);white-space:nowrap;overflow:hidden;line-height:1.2}
+.page-a .tile-foot .cd{font-size:var(--fs-cd-a);font-weight:var(--w-emph)}
+.page-a .tile-foot .word{font-size:var(--fs-min)}
+.page-a .tile-foot svg{align-self:center}
+.page-a .tile-foot svg{color:var(--mute);flex:none}
+.page-a .tile-foot[data-level="warn"]   svg{color:var(--quota-warn)}
+.page-a .tile-foot[data-level="danger"] svg{color:var(--quota-danger)}
+.page-a .tile-foot[data-level="warn"]   span,
+.page-a .tile-foot[data-level="danger"] span{color:var(--body)}
+.page-a .tile-foot[data-status="attention"] svg,
+.page-a .tile-foot[data-status="attention"] span{color:var(--ink)}
+.page-a .tile-foot:empty{visibility:hidden}
+.page-a .verdict-word{font-family:var(--font-sans);font-size:var(--fs-min)}
+
+/* ==========================================================================
+   B 页 · 额度详情
+   ========================================================================== */
+.page-b .bands{flex:1;display:flex;flex-direction:column;gap:var(--sp-md);min-height:0}
+.page-b .tile{flex:1;min-height:0;padding:var(--sp-sm) var(--sp-md);gap:var(--sp-sm);justify-content:center}
+.page-b .b-head{display:flex;align-items:center;gap:var(--sp-sm);height:22px;flex:none}
+/* R3-05 固定列宽让三条判语共享左边缘；R5-08 修正两点：108px 对「Claude Code」
+   余量归零（实测需 109px），且 inline-flex 下 text-overflow 对匿名文本项不生效——
+   省略号「装了但没通电」。改 min-width:112px + 内层 span 承载省略号。 */
+.page-b .b-name{font-size:var(--fs-body-r);font-weight:var(--w-emph);color:var(--ink);
+  display:flex;align-items:center;gap:var(--sp-xs);min-width:112px;flex:none;line-height:1}
+.page-b .b-name span.t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.page-b .b-verdict{font-size:var(--fs-min);color:var(--mute);flex:1;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.2}
+.page-b .b-verdict[data-tone="over"]{color:var(--quota-warn)}
+.page-b .b-verdict[data-tone="error"]{color:var(--danger)}
+.page-b .b-verdict[data-tone="attn"]{color:var(--ink);font-weight:var(--w-read)}
+.page-b .b-pc{font-size:var(--fs-num-b);font-weight:var(--w-emph);color:var(--ink);flex:none}
+.page-b [data-level="warn"]   .b-pc{color:var(--quota-warn)}
+.page-b [data-level="danger"] .b-pc{color:var(--quota-danger)}
+.page-b .b-sec{font-size:var(--fs-body-r);color:var(--mute);flex:none}
+.page-b .b-cd{font-size:var(--fs-min);color:var(--mute);flex:none;width:48px;text-align:right}
+.page-b .band{position:relative;height:12px;flex:none;
+  background:var(--quota-track);border-radius:var(--r-xs);overflow:hidden}
+.page-b .band .used{position:absolute;left:0;top:0;bottom:0;background:var(--quota-fill);
+  border-radius:var(--r-xs) 0 0 var(--r-xs);
+  box-shadow:var(--quota-notch-w) 0 0 var(--quota-notch);
+  transition:width var(--dur-bar) var(--ease-standard)}
+.page-b [data-level="warn"]   .band .used{background:var(--quota-warn)}
+.page-b [data-level="danger"] .band .used{background:var(--quota-danger)}
+/* 「现在」游标：--canvas，对轨道 3.75、对各档填充 6.81–13.39，不随填充色漂移 */
+.page-b .band .caret{position:absolute;top:0;bottom:0;width:2px;background:var(--quota-notch);margin-left:-1px}
+/* R5-02 · 重置刻度原来是带内一道 --mute 竖线，对 ash 轨道只有 1.95:1，不可辨；
+   而且在 97% 那种窗口末期会和「现在」游标挤成一个 4px 的明暗簇（R5-10）。
+   改成与游标同源的机制：上下各出头 2px 落到带外的 --surface 上（7.09:1），
+   靠位置和出头形状传信息，不靠颜色差，也就再不会与带内的游标争同一段像素。 */
+.page-b .bandbox{position:relative;flex:none}
+.page-b .band .resettick{display:none}
+.page-b .bandbox .resettick{position:absolute;top:-2px;bottom:-2px;right:0;width:2px;
+  background:var(--mute);border-radius:1px}
+.page-b .b-note{font-size:var(--fs-min);color:var(--body);line-height:1.3;flex:none;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ==========================================================================
+   C 页 · 事件
+   ========================================================================== */
+.page-c .feed{flex:1;display:flex;flex-direction:column;gap:var(--sp-xs);min-height:0;overflow:hidden}
+.row{appearance:none;-webkit-appearance:none;width:100%;text-align:left;
+  background:transparent;border:1px solid transparent;border-radius:var(--r-sm);
+  color:inherit;font:inherit;cursor:pointer;flex:none;position:relative;
+  display:grid;align-items:center;column-gap:var(--sp-sm);padding:0 var(--sp-sm);
+  grid-template-columns:64px minmax(0,1fr) 68px 14px var(--dot);height:46px;
+  transition:background var(--dur-state) var(--ease-standard),border-color var(--dur-state) var(--ease-standard)}
+
+.row.lead{height:56px}
+.row.lead .rtitle{font-size:var(--fs-lead-r);font-weight:var(--w-emph);color:var(--ink);line-height:1.15}
+.chip{font-size:var(--fs-min);font-weight:var(--w-emph);letter-spacing:var(--tr-caps);
+  text-transform:uppercase;color:var(--idc);white-space:nowrap;line-height:1.2}
+.attn-tag{display:inline-flex;align-items:center;gap:var(--sp-xs);font-size:var(--fs-min);
+  font-weight:var(--w-emph);letter-spacing:var(--tr-small);color:var(--ink);white-space:nowrap;line-height:1}
+.rtitle{font-size:var(--fs-body-r);line-height:1.2;color:var(--body);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.rtime{font-family:var(--font-num);font-feature-settings:var(--num-features);
+  font-variant-numeric:tabular-nums;font-size:var(--fs-min);color:var(--mute);
+  white-space:nowrap;text-align:right;line-height:1}
+.rkind{display:inline-flex;align-items:center;justify-content:center;color:var(--mute)}
+.rkind[data-kind="failed"]{color:var(--danger)}
+.rkind[data-kind="running"]{color:var(--idc);animation:pulse var(--cycle-pulse) var(--ease-standard) infinite}
+.rmark{width:var(--dot);height:var(--dot);border-radius:var(--r-full);background:transparent;justify-self:end}
+.row[data-unread="1"]{background:var(--surface)}
+.row[data-unread="1"] .rtitle{color:var(--ink);font-weight:var(--w-emph)}
+.row[data-unread="1"] .rmark{background:var(--accent)}
+.row[data-aged="1"] .rtitle{color:var(--body);font-weight:var(--w-read)}
+.row[data-aged="1"] .rmark{background:var(--accent-dim)}
+.row[data-kind="attention"]{background:var(--surface-card);border-color:var(--ash)}
+.row[data-kind="attention"] .rtitle{color:var(--ink);font-weight:var(--w-emph)}
+.row[data-kind="attention"] .rmark{background:var(--accent)}
+/* R5-06 · hover 必须排在属性规则之后，否则未读行（surface）与 attention 行
+   （surface-card）的背景会把它盖掉，等于这两类行没有 hover 反馈。
+   attention 行已经在 surface-card 上，再升一档没有余量，改用 1px --ash 内描边。 */
+.row:hover{background:var(--surface-card)}
+.row[data-kind="attention"]:hover{box-shadow:inset 0 0 0 1px var(--ash)}
+.row:active{background:var(--surface-elevated);box-shadow:inset 0 0 0 1px var(--ash);
+  transition-duration:var(--dur-instant)}
+.row:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--accent)}
+
+.row.enter{animation:enter var(--dur-event) var(--ease-standard) both}
+@keyframes enter{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+.feed-msg{flex:1;display:flex;flex-direction:column;justify-content:center;gap:var(--sp-xs);padding:0 var(--sp-sm)}
+.feed-skel{flex:1;display:flex;flex-direction:column;gap:var(--sp-xs)}
+.feed-skel i{display:block;height:46px;background:var(--stone);border-radius:var(--r-sm);flex:none}
+.feed-skel i:first-child{height:56px}
+
+/* ==========================================================================
+   attention 页 · 整屏只为这一件事
+   ========================================================================== */
+.page-attn{justify-content:center}
+.attn-card{background:var(--surface-card);border:1px solid var(--ash);border-radius:var(--r-md);
+  padding:var(--sp-lg);display:flex;flex-direction:column;gap:var(--sp-md);position:relative}
+.attn-who{display:inline-flex;align-items:center;gap:var(--sp-sm);font-size:var(--fs-body-r);
+  font-weight:var(--w-emph);letter-spacing:var(--tr-caps);text-transform:uppercase;color:var(--idc);line-height:1}
+.attn-who::before{content:"";width:var(--dot);height:var(--dot);border-radius:var(--r-full);background:var(--idc)}
+/* R5-20 · accent 的定义是「未读 / 需要你」，而这一页就是「需要你」本身，
+   原来却是全屏 0 处 accent。用与未读点同一套词汇（6px 圆点）在卡片右上兑现一次，
+   身份仍由左侧的身份色点 + 大写徽记承担。做成真实元素而不是伪元素——
+   伪元素躲得过 accent 全量扫描，那这处 accent 在断言里就是隐形的。 */
+.attn-dot{position:absolute;top:var(--sp-md);right:var(--sp-md);
+  width:var(--dot);height:var(--dot);border-radius:var(--r-full);background:var(--accent)}
+.attn-lead{display:flex;align-items:center;gap:var(--sp-sm);font-size:var(--fs-attn-lead);
+  font-weight:var(--w-announce);color:var(--ink);line-height:1.1}
+.attn-lead svg{flex:none}
+.attn-what{font-size:var(--fs-attn-body);line-height:1.35;color:var(--body);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.attn-meta{font-size:var(--fs-min);color:var(--mute);display:flex;gap:var(--sp-sm);align-items:baseline}
+.attn-meta .mono{font-size:var(--fs-min)}
+
+/* ==========================================================================
+   REDUCED MOTION —— 媒体查询与控制栏开关，任一生效即全停（含切页动画）
+   ========================================================================== */
+@media (prefers-reduced-motion:reduce){
+  .stage *,.stage *::before,.stage *::after{animation:none!important;transition:none!important}
+  .page{transform:none!important}
+}
+html[data-rm="1"] .stage *,
+html[data-rm="1"] .stage *::before,
+html[data-rm="1"] .stage *::after{animation:none!important;transition:none!important}
+html[data-rm="1"] .page{transform:none!important}
+</style>
+</head>
+
+<body>
+
+<div class="harness">
+  <div class="hgroup"><b>页</b>
+    <div class="seg" id="segPage" role="group" aria-label="切换页">
+      <button type="button" data-p="a" aria-pressed="true">A 总览</button>
+      <button type="button" data-p="b" aria-pressed="false">B 额度</button>
+      <button type="button" data-p="c" aria-pressed="false">C 事件</button>
+      <button type="button" data-p="attn" aria-pressed="false">attention</button>
+    </div>
+  </div>
+  <div class="hgroup">
+    <label class="hcheck"><input type="checkbox" id="chkRotate" checked> 自动轮播</label>
+    <span class="hmeter" id="meter">A · 10.0s</span>
+  </div>
+  <div class="hgroup"><b>状态</b>
+    <div class="seg" id="segState" role="group" aria-label="切换状态">
+      <button type="button" data-s="populated" aria-pressed="true">populated</button>
+      <button type="button" data-s="loading"   aria-pressed="false">loading</button>
+      <button type="button" data-s="empty"     aria-pressed="false">empty</button>
+      <button type="button" data-s="error"     aria-pressed="false">error</button>
+      <button type="button" data-s="edge"      aria-pressed="false">edge</button>
+      <button type="button" data-s="attention" aria-pressed="false">attention</button>
+      <button type="button" data-s="running"   aria-pressed="false">running</button>
+    </div>
+  </div>
+  <div class="hgroup">
+    <button type="button" class="hbtn" id="btnPure">纯净全屏</button>
+    <button type="button" class="hbtn" id="btnPush">模拟新事件</button>
+    <button type="button" class="hbtn" id="btnAttn">模拟等待批准</button>
+    <label class="hcheck"><input type="checkbox" id="chkRm"> reduced-motion</label>
+  </div>
+</div>
+
+<p class="pure-hint" id="pureHint" hidden>按任意键进入全屏</p>
+
+<div class="stage-wrap">
+  <div class="stage" id="stage">
+    <div class="screen">
+      <h1 class="sr">Agent Monitor 副屏面板</h1>
+      <div class="topbar">
+        <span class="loading-label" id="topLoading" hidden>读取中</span>
+        <span class="tb-right"><span class="clock" id="clock" data-clock>16:32</span><span class="unread" id="unread"></span></span>
+      </div>
+      <div class="pages" id="pages">
+        <section class="page page-a" data-p="a"><h2 class="sr">额度总览</h2><div class="tiles" id="paTiles"></div></section>
+        <section class="page page-b" data-p="b"><h2 class="sr">额度详情</h2><div class="bands" id="pbBands"></div></section>
+        <section class="page page-c" data-p="c"><h2 class="sr" id="feedTitle">最近完成</h2><div class="feed" id="pcFeed"></div></section>
+        <section class="page page-attn" data-p="attn"><h2 class="sr">需要你</h2><div id="paAttn"></div></section>
+        <div class="dots" id="dots" data-not-accent>
+          <i data-not-accent></i><i data-not-accent></i><i data-not-accent></i>
+        </div>
+      </div>
+    </div>
+    <p class="sr" role="status" aria-live="polite" id="live"></p>
+  </div>
+</div>
+
+<p class="legend" id="legend"></p>
+
+<!-- fixtures 内联，不 fetch —— 与 design/fixtures/*.json 逐字相同 -->
+<script type="application/json" id="fx-quota">{
+ "generatedAt": "2026-09-14T16:32:48+08:00",
+ "codex": {
+  "status": "ok",
+  "source": "codexbar usage --provider codex --json (real, today)",
+  "plan": "plus",
+  "windows": [
+   {
+    "label": "5h",
+    "usedPercent": 22,
+    "resetsAt": "2026-09-14T08:56:08Z"
+   },
+   {
+    "label": "7d",
+    "usedPercent": 7,
+    "resetsAt": "2026-09-19T19:21:22Z"
+   }
+  ]
+ },
+ "claude": {
+  "status": "sample",
+  "source": "SAMPLE — /api/oauth/usage was rate-limited today; shape matches rate_limits.five_hour/seven_day",
+  "plan": "max_20x",
+  "windows": [
+   {
+    "label": "5h",
+    "usedPercent": 18,
+    "resetsAt": "2026-09-14T17:00:00+08:00"
+   },
+   {
+    "label": "7d",
+    "usedPercent": 31,
+    "resetsAt": "2026-09-19T11:00:00+08:00"
+   }
+  ]
+ },
+ "zcode": {
+  "status": "ok",
+  "source": "open.bigmodel.cn /api/monitor/usage/quota/limit (real, key read from Keychain)",
+  "plan": "bigmodel coding plan · pro",
+  "windows": [
+   {
+    "label": "5h",
+    "usedPercent": 61,
+    "resetsAt": "2026-09-14T16:42:27+08:00"
+   },
+   {
+    "label": "7d",
+    "usedPercent": 17,
+    "resetsAt": "2026-09-18T16:35:33+08:00"
+   },
+   {
+    "label": "1mo",
+    "usedPercent": 1,
+    "current": 8,
+    "total": 1000,
+    "unit": "MCP 调用",
+    "resetsAt": "2026-09-23T18:00:55+08:00"
+   }
+  ]
+ }
+}</script>
+<script type="application/json" id="fx-events">{
+ "generatedAt": "2026-09-14T16:32:48+08:00",
+ "events": [
+  {
+   "id": "zcode:sess_c50ac151-2277-4bbb-ad95-6504318e8eaf",
+   "agent": "zcode",
+   "kind": "completed",
+   "title": "评估集构造合理性审查",
+   "summary": "",
+   "cwd": "~/Downloads/VP语料生成/评估集-1.4内容转换与编辑-v0.1",
+   "source": "GLM-5.3-Flash",
+   "at": "2026-09-14T16:03:00+08:00",
+   "durationMs": null
+  },
+  {
+   "id": "zcode:sess_de077ecf-897d-4a86-93ef-52e908c2796f",
+   "agent": "zcode",
+   "kind": "completed",
+   "title": "合并四个文件并添加训练评估集标签列",
+   "summary": "",
+   "cwd": "~/Downloads/v0.2 分类模型训练数据",
+   "source": "GLM-5.3-Flash",
+   "at": "2026-09-14T14:32:04+08:00",
+   "durationMs": null
+  },
+  {
+   "id": "claude:9cae60c4",
+   "agent": "claude",
+   "kind": "completed",
+   "title": "本地的插件帮我更新到最新的版本吧 现在应该是1.0.6了",
+   "summary": "我先看下记忆里关于插件的记录，确认\"本地的插件\"指的是哪个。",
+   "cwd": "~/Projects/dsh-ime",
+   "source": "Claude Code",
+   "at": "2026-09-14T08:32:10.771Z",
+   "durationMs": null
+  },
+  {
+   "id": "claude:9c3cb134",
+   "agent": "claude",
+   "kind": "completed",
+   "title": "我现在电脑连接了一个非常小的副屏 这个副屏的作用是用来监控我的agent调用情况 现在我用的比较多的agent是codex z…",
+   "summary": "收到。这枚 Key 我只做两件事：存进 macOS Keychain（app 以后从那里读，不进仓库、不进 fixtures、不写进任何文件），以及用它调一次智谱的额度接口验证可用性并拿到 ZCode 的真实额度。之后回复里我不会再出现这…",
+   "cwd": "~/Projects/Monitor",
+   "source": "Claude Code",
+   "at": "2026-09-14T08:32:09.888Z",
+   "durationMs": null
+  },
+  {
+   "id": "claude:ca18872a",
+   "agent": "claude",
+   "kind": "completed",
+   "title": "这个项目现在在本地起了吗 我想看一下我的数据",
+   "summary": "两项都完成了：",
+   "cwd": "~/Projects/dsh-ime-demos",
+   "source": "Claude Code",
+   "at": "2026-09-14T06:21:57.313Z",
+   "durationMs": null
+  },
+  {
+   "id": "claude:730aa9dd",
+   "agent": "claude",
+   "kind": "completed",
+   "title": "Reply with only: OK",
+   "summary": "Failed to authenticate: OAuth session expired and could not be refreshed",
+   "cwd": "~/.hermes/scripts",
+   "source": "Claude Code",
+   "at": "2026-09-14T02:21:53.772Z",
+   "durationMs": null
+  },
+  {
+   "id": "claude:6fd3200e",
+   "agent": "claude",
+   "kind": "completed",
+   "title": "Reply with only: OK",
+   "summary": "Failed to authenticate: OAuth session expired and could not be refreshed",
+   "cwd": "~/.hermes/scripts",
+   "source": "Claude Code",
+   "at": "2026-09-13T02:36:18.244Z",
+   "durationMs": null
+  },
+  {
+   "id": "claude:496c2d6c",
+   "agent": "claude",
+   "kind": "completed",
+   "title": "起一下本地dsh的端口",
+   "summary": "已经在本地了：[harness-connection-prd.md](../../../../Downloads/harness-connection-prd.md)，就在 Downloads 根目录，工具包 [dsh-harness-t…",
+   "cwd": "~/Library/Application Support/Claude/scratch-workspaces/dbdfc46a-c6af-49f4-ab37-383810d89899/b64c6b6f-ec6c-4257-a677-fb31c0de5a74/scratch-2026-09-09-0b7aa6",
+   "source": "Claude Code",
+   "at": "2026-09-11T09:10:05.597Z",
+   "durationMs": null
+  },
+  {
+   "id": "claude:52287878",
+   "agent": "claude",
+   "kind": "completed",
+   "title": "梳理一下这个项目里的eval mode现在的内容 给我一个优化建议",
+   "summary": "两页都已更新，链接不变：",
+   "cwd": "~/Projects/coop-social-copilot",
+   "source": "Claude Code",
+   "at": "2026-09-11T09:00:20.453Z",
+   "durationMs": null
+  },
+  {
+   "id": "codex:01a08ac2-a8b0-7e01-8a3a-7b7390a4dd76:01a08ac2-aab2-7c20-8bca-71be4c9aaf85",
+   "agent": "codex",
+   "kind": "failed",
+   "title": "回复ok",
+   "summary": "{'message': '{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"inva…",
+   "cwd": "/private/tmp/v03_construct",
+   "source": "codex_exec",
+   "at": "2026-09-10T18:00:15+08:00",
+   "durationMs": 5876
+  },
+  {
+   "id": "codex:01a08ac1-ff67-79c0-af35-f1da4e15f69f:01a08ac2-01f8-7713-8bfc-9e85dc9b0736",
+   "agent": "codex",
+   "kind": "failed",
+   "title": "# 盲判任务：只根据 asr_text 和 context 推断 path 你是语音输入法的场景分类器。对每条样本，只用 `a…",
+   "summary": "{'message': '{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"inva…",
+   "cwd": "/private/tmp/v03_construct",
+   "source": "codex_exec",
+   "at": "2026-09-10T17:59:31+08:00",
+   "durationMs": 6086
+  },
+  {
+   "id": "zcode:sess_6aa26fbd-3f4a-449f-b1a0-f028a33d04e3",
+   "agent": "zcode",
+   "kind": "completed",
+   "title": "v0.3 skill转写集",
+   "summary": "",
+   "cwd": "~/Downloads/提示词优化-skill数据-20260827",
+   "source": "GLM-5.3-Flash",
+   "at": "2026-09-10T14:41:56+08:00",
+   "durationMs": null
+  },
+  {
+   "id": "codex:01a0853b-7564-7100-9260-a100fa439a47:01a08542-6419-7f81-b50d-9dd9c8c40e33",
+   "agent": "codex",
+   "kind": "completed",
+   "title": "Centered composition: an oil painting on a canvas board standin…",
+   "summary": "让乌鸦退入景中，成为目光停留之后才发现的侧影。缩小它的比例，移到画面下方偏侧，减弱轮廓光，让胸腹的黑与焦竹、暮色相融；喙与额头仍保留可辨认的侧面线条。",
+   "cwd": "~/Documents/Codex/2026-09-09/centered-composition-an-oil-painting-on",
+   "source": "Codex Desktop",
+   "at": "2026-09-09T16:22:11+08:00",
+   "durationMs": 15687
+  },
+  {
+   "id": "codex:01a0853b-7564-7100-9260-a100fa439a47:01a0853d-0948-7ae2-8f17-07ab7d9638e3",
+   "agent": "codex",
+   "kind": "completed",
+   "title": "Centered composition: an oil painting on a canvas board standin…",
+   "summary": "我想把它重构成 **《灰烬尚温》**。",
+   "cwd": "~/Documents/Codex/2026-09-09/centered-composition-an-oil-painting-on",
+   "source": "Codex Desktop",
+   "at": "2026-09-09T16:16:47+08:00",
+   "durationMs": 42890
+  },
+  {
+   "id": "codex:01a084fc-e92f-7761-a0d8-773f844983fb:01a084fd-8f30-7ee3-a160-237e2db55ce2",
+   "agent": "codex",
+   "kind": "completed",
+   "title": "拿一下这个页面上所有skill的详情 边界定义和skill内容 整理成一个独立文件夹 按照skill来分",
+   "summary": "Computer Use 被系统阻止继续访问该内网页面，当前会话已强制结束。已确认页面共有 6 个 skill，但无法完整提取并落盘；页面数据未被修改。",
+   "cwd": "~/Documents/Codex/2026-09-09/na-y",
+   "source": "Codex Desktop",
+   "at": "2026-09-09T15:12:03+08:00",
+   "durationMs": 318282
+  },
+  {
+   "id": "zcode:sess_9b4959af-196c-46dd-a280-09f2352c44b0",
+   "agent": "zcode",
+   "kind": "completed",
+   "title": "设计首页展示的单指令编辑案例",
+   "summary": "",
+   "cwd": "~/.zcode/workspace/default",
+   "source": "GLM-5.3-Flash",
+   "at": "2026-09-07T21:02:33+08:00",
+   "durationMs": null
+  },
+  {
+   "id": "zcode:sess_85519c63-c2b6-461e-b400-e51dc86cbb28",
+   "agent": "zcode",
+   "kind": "completed",
+   "title": "v0.5评估集构造",
+   "summary": "",
+   "cwd": "~/Downloads/VP语料生成",
+   "source": "GLM-5.3-Flash",
+   "at": "2026-09-07T17:17:32+08:00",
+   "durationMs": null
+  },
+  {
+   "id": "codex:019ff9e8-6bb6-7741-bd36-9b260516561b:01a07b0c-5f07-7763-97f6-3ccd2222de93",
+   "agent": "codex",
+   "kind": "completed",
+   "title": "/goal 你在互联网上搜索一下免费的NBA数据API或者数据库 可以即时访问的那种 优先免费了 测试端口可用性后给我一个整体…",
+   "summary": "可以。这套我会做成：**字母＋Scottie Barnes 的内线、全能锋线体系，主动放弃 FT%，降低三分投入，靠篮板、助攻、防守和 DD 建立优势。**",
+   "cwd": "~/Documents/Codex/2026-08-13/new-chat",
+   "source": "Codex Desktop",
+   "at": "2026-09-07T16:48:19+08:00",
+   "durationMs": 96356
+  },
+  {
+   "id": "codex:019ff9e8-6bb6-7741-bd36-9b260516561b:01a07b05-f438-76f2-8dfc-a641705788d1",
+   "agent": "codex",
+   "kind": "completed",
+   "title": "/goal 你在互联网上搜索一下免费的NBA数据API或者数据库 可以即时访问的那种 优先免费了 测试端口可用性后给我一个整体…",
+   "summary": "找到了，是之前生成的这份 [排名汇总 Excel](</Users/tonyye/Documents/Codex/2026-08-13/new-chat/outputs/fantasy-rankings-2627/nba_fantasy_…",
+   "cwd": "~/Documents/Codex/2026-08-13/new-chat",
+   "source": "Codex Desktop",
+   "at": "2026-09-07T16:40:22+08:00",
+   "durationMs": 39507
+  },
+  {
+   "id": "codex:019ff9e8-6bb6-7741-bd36-9b260516561b:01a07b05-62e7-7643-b883-67c50708d9c8",
+   "agent": "codex",
+   "kind": "completed",
+   "title": "/goal 你在互联网上搜索一下免费的NBA数据API或者数据库 可以即时访问的那种 优先免费了 测试端口可用性后给我一个整体…",
+   "summary": "好，后续以 **Yahoo 排名为主，13 项适配分析为辅**，不再混合多个网站生成排序。",
+   "cwd": "~/Documents/Codex/2026-08-13/new-chat",
+   "source": "Codex Desktop",
+   "at": "2026-09-07T16:39:22+08:00",
+   "durationMs": 16781
+  },
+  {
+   "id": "codex:019ff9e8-6bb6-7741-bd36-9b260516561b:01a07af7-a8fe-7a92-9cea-0b41f8c28cb5",
+   "agent": "codex",
+   "kind": "completed",
+   "title": "/goal 你在互联网上搜索一下免费的NBA数据API或者数据库 可以即时访问的那种 优先免费了 测试端口可用性后给我一个整体…",
+   "summary": "**Tatum 比 Avdija 更适合进入你的首轮讨论。若健康与出场负荷没有明显限制，在你这套 13 项里，我倾向第 7 签选 Tatum，而不是强拿 Maxey。**但这个健康前提不能省略——上一版没有把他充分列入首轮候选，是我的遗漏。",
+   "cwd": "~/Documents/Codex/2026-08-13/new-chat",
+   "source": "Codex Desktop",
+   "at": "2026-09-07T16:25:05+08:00",
+   "durationMs": 59278
+  },
+  {
+   "id": "codex:019ff9e8-6bb6-7741-bd36-9b260516561b:01a07af2-7d76-7bd3-82de-3bca36997f71",
+   "agent": "codex",
+   "kind": "completed",
+   "title": "/goal 你在互联网上搜索一下免费的NBA数据API或者数据库 可以即时访问的那种 优先免费了 测试端口可用性后给我一个整体…",
+   "summary": "**不需要在 Cade、SGA 都没了以后，自动第 7 顺位拿 Maxey。上一版我把他列成顺位备胎，过于机械，应当修正。**",
+   "cwd": "~/Documents/Codex/2026-08-13/new-chat",
+   "source": "Codex Desktop",
+   "at": "2026-09-07T16:20:25+08:00",
+   "durationMs": 117864
+  },
+  {
+   "id": "zcode:sess_3fc31438-01cd-453f-bf3d-8b41255c78e1",
+   "agent": "zcode",
+   "kind": "completed",
+   "title": "查找评估集分类数据并refine比例",
+   "summary": "",
+   "cwd": "~/Downloads/提示词优化-skill数据-20260827",
+   "source": "GLM-5.3-Flash",
+   "at": "2026-09-07T16:15:21+08:00",
+   "durationMs": null
+  },
+  {
+   "id": "zcode:sess_b2c34b6b-6ef8-45c5-9bfe-49cdbc4a8857",
+   "agent": "zcode",
+   "kind": "completed",
+   "title": "v0.5训练集构造b4",
+   "summary": "",
+   "cwd": "~/Downloads/VP语料生成",
+   "source": "GLM-5.3-Flash",
+   "at": "2026-09-07T15:56:19+08:00",
+   "durationMs": null
+  },
+  {
+   "id": "zcode:sess_6343b689-3bba-4adf-bb89-2f372d103e05",
+   "agent": "zcode",
+   "kind": "completed",
+   "title": "skill分类refine",
+   "summary": "",
+   "cwd": "~/.zcode/workspace/default",
+   "source": "GLM-5.3-Flash",
+   "at": "2026-09-06T17:13:49+08:00",
+   "durationMs": null
+  },
+  {
+   "id": "zcode:sess_6307b82f-2165-45da-8ff5-08d00c2b4a08",
+   "agent": "zcode",
+   "kind": "completed",
+   "title": "v0.5训练集构造b4",
+   "summary": "",
+   "cwd": "~/Downloads/VP语料生成",
+   "source": "GLM-5.3-Flash",
+   "at": "2026-09-05T15:39:18+08:00",
+   "durationMs": null
+  },
+  {
+   "id": "zcode:sess_8dadc98a-868b-4b52-aa53-cf6e00a9cc01",
+   "agent": "zcode",
+   "kind": "completed",
+   "title": "v0.5baseline转写数据增补",
+   "summary": "",
+   "cwd": "~/.zcode/workspace/default",
+   "source": "GLM-5.3-Flash",
+   "at": "2026-09-04T19:03:21+08:00",
+   "durationMs": null
+  },
+  {
+   "id": "claude:c3d6b124",
+   "agent": "claude",
+   "kind": "completed",
+   "title": "@\"/Users/tonyye/Library/Containers/com.tencent.xinWeChat/Data/D…",
+   "summary": "逐条修改意见已整理完成：[质检复核稿-逐条修改意见-20260903.md](质检复核稿-逐条修改意见-20260903.md)，覆盖质检稿展示的全部 126 条。",
+   "cwd": "~/Downloads/提示词优化-skill数据-20260827",
+   "source": "Claude Code",
+   "at": "2026-09-03T14:39:31.334Z",
+   "durationMs": null
+  },
+  {
+   "id": "claude:1dc2ff35",
+   "agent": "claude",
+   "kind": "completed",
+   "title": "看一下handy 现在各个端口都是正常工作的吗",
+   "summary": "清单已生成：**`~/Downloads/chatterfly-dsh-对齐checklist.md`**",
+   "cwd": "~",
+   "source": "Claude Code",
+   "at": "2026-08-26T11:31:58.241Z",
+   "durationMs": null
+  },
+  {
+   "id": "claude:1dc2ff35",
+   "agent": "claude",
+   "kind": "completed",
+   "title": "看一下handy 现在各个端口都是正常工作的吗",
+   "summary": "清单已生成：**`~/Downloads/chatterfly-dsh-对齐checklist.md`**",
+   "cwd": "~",
+   "source": "Claude Code",
+   "at": "2026-08-26T11:31:58.241Z",
+   "durationMs": null
+  }
+ ]
+}</script>
+
+<script>
+(() => {
+"use strict";
+
+/* 时间原点冻结在两份 fixtures 的 generatedAt，倒计时才与 resetsAt 自洽、截图可复现 */
+const NOW0 = new Date("2026-09-14T16:32:48+08:00").getTime();
+const BOOT = Date.now();
+const now  = () => NOW0 + (Date.now() - BOOT);
+
+const QUOTA  = JSON.parse(document.getElementById("fx-quota").textContent);
+const EVENTS = JSON.parse(document.getElementById("fx-events").textContent).events;
+
+const AGENTS = {
+  codex : {id:"codex",  name:"Codex",       tag:"Codex",  color:"var(--id-codex)" },
+  claude: {id:"claude", name:"Claude Code", tag:"Claude", color:"var(--id-claude)"},
+  zcode : {id:"zcode",  name:"ZCode",       tag:"ZCode",  color:"var(--id-zcode)" },
+};
+
+const p2 = n => String(n).padStart(2,"0");
+const hhmm = d => p2(d.getHours()) + ":" + p2(d.getMinutes());
+const sameDay = (a,b) => a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate();
+const countdown = (iso, ref) => {
+  const ms = Math.max(0, new Date(iso).getTime() - ref);
+  const m = Math.floor(ms/60000), h = Math.floor(m/60);
+  return h > 0 ? `${h}h${p2(m%60)}m` : `${m}m`;
+};
+const elapsedFmt = ms => {
+  const s = Math.max(0, Math.floor(ms/1000));
+  return s < 3600 ? `${Math.floor(s/60)}m${p2(s%60)}s` : `${Math.floor(s/3600)}h${p2(Math.floor(s/60)%60)}m`;
+};
+const whenFmt = (iso, ref) => {
+  const d = new Date(iso), diff = ref - d.getTime();
+  if (diff < 60000) return "刚刚";
+  if (diff < 3600000) return `${Math.floor(diff/60000)} 分钟前`;
+  return sameDay(d, new Date(ref)) ? hhmm(d) : `${d.getMonth()+1}/${d.getDate()} ${hhmm(d)}`;
+};
+const level = p => p >= 95 ? "danger" : p >= 80 ? "warn" : "ok";
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const WIN5H = 5*3600*1000;
+const KIND_LABEL = {running:"运行中", failed:"失败", attention:"等待批准", completed:"已完成"};
+const FEED_TITLE = {attention:"需要你", running:"进行中", loading:"事件", empty:"事件", error:"事件"};
+
+const ICON = {
+  clock:'<circle cx="8" cy="8" r="5.8"/><path d="M8 4.6V8l2.4 1.5"/>',
+  check:'<path d="M3 8.4 6.2 11.6 13 4.8"/>',
+  alert:'<circle cx="8" cy="8" r="6"/><path d="M8 4.9v3.5"/><path d="M8 11.2h.01"/>',
+  ret  :'<path d="M13.2 3.8v3.4a2 2 0 0 1-2 2H3.4"/><path d="M6.2 6.6 3.2 9.2l3 2.8"/>',
+  key  :'<circle cx="5.6" cy="10.4" r="2.7"/><path d="M7.6 8.5 13 3.1"/><path d="M10.7 5.9 12.3 7.5"/>',
+  lock :'<rect x="3" y="7.1" width="10" height="6.3" rx="1.7"/><path d="M5.4 7.1V5.3a2.6 2.6 0 0 1 5.2 0v1.8"/>',
+  hour :'<path d="M4.5 2.6h7M4.5 13.4h7"/><path d="M5.6 2.6v2.1L8 7.1l2.4-2.4V2.6"/><path d="M5.6 13.4v-2.1L8 8.9l2.4 2.4v2.1"/>',
+  wifi :'<path d="M2.3 6.1a9.2 9.2 0 0 1 3.1-1.8"/><path d="M13.7 6.1a9.2 9.2 0 0 0-4.4-2"/><path d="M4.8 8.7a5.6 5.6 0 0 1 1.7-1"/><path d="M11.2 8.7a5.6 5.6 0 0 0-1.3-.8"/><path d="M8 11.9h.01"/><path d="M2.4 2.4 13.6 13.6"/>',
+  inbox:'<path d="M2.2 9.4h3.1l.9 1.9h3.6l.9-1.9h3.1"/><path d="M3.5 3.1h9l1.3 6.3v3.5H2.2V9.4z"/>',
+  radio:'<circle cx="8" cy="8" r="1.6"/><path d="M4.8 11.2a4.5 4.5 0 0 1 0-6.4"/><path d="M11.2 4.8a4.5 4.5 0 0 1 0 6.4"/><path d="M2.4 2.4 13.6 13.6"/>',
+  dot  :'<circle cx="8" cy="8" r="3.2"/>',
+};
+const svg = (n, s = 14) =>
+  `<svg viewBox="0 0 16 16" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="1.6" ` +
+  `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[n]}</svg>`;
+
+/* ---------- 场景（与单屏版同源，全部来自内联 fixtures） ---------- */
+const seen = new Set();
+const SRC = EVENTS.filter(e => !seen.has(e.id) && seen.add(e.id));
+const pick = id => SRC.find(e => e.id.startsWith(id));
+const toItem = (e, over) => Object.assign({
+  id:e.id, agent:e.agent, kind:e.kind, title:e.title, summary:e.summary || "", at:e.at, unread:false,
+}, over || {});
+const BASE_FEED = SRC.slice(0, 6).map((e, i) => toItem(e, {unread: i === 0}));
+const CODEX_OK = QUOTA.codex.windows, CLAUDE_OK = QUOTA.claude.windows, ZCODE_OK = QUOTA.zcode.windows;
+/* Key 已进 Keychain，额度接口实测可用 —— 「未连接」从静止态退成 empty 态的一种
+   （Key 缺失时才出现）。ZCode 的 5h 是 61%：落在 ok 区间但离 warn 只差 19 个点，
+   正好用来验三块瓦片的层级在「都正常但有一块明显偏高」时还读不读得出来。 */
+const ZCODE_OFF = {tone:"empty", icon:"key", title:"未连接", why:"还没有智谱 API Key"};
+const ATTN_ITEM = {id:"attn1", agent:"claude", kind:"attention", unread:true,
+  title:"批准写入 ~/.claude/settings.json", summary:"会话已暂停，等待 Write 权限确认",
+  at:"2026-09-14T14:32:39+08:00"};
+const EDGE_FEED = SRC.slice(0, 8).map((e, i) => toItem(e, {
+  id:"edge"+i, at:`2026-09-14T16:3${i < 3 ? 2 : 1}:${p2(59 - i * 7)}+08:00`, unread:true}));
+
+const SCENES = {
+  populated: () => ({tiles:[
+      {agent:"codex",  phase:"ok", status:"idle", windows:CODEX_OK},
+      {agent:"claude", phase:"ok", status:"idle", windows:CLAUDE_OK},
+      {agent:"zcode",  phase:"ok", status:"idle", windows:ZCODE_OK}],
+    feed:{phase:"ok", items:BASE_FEED.map(x => ({...x}))}}),
+  loading: () => ({tiles:["codex","claude","zcode"].map(a => ({agent:a, phase:"loading", status:"idle"})),
+    feed:{phase:"loading"}}),
+  empty: () => ({tiles:[
+      {agent:"codex", phase:"msg", status:"idle", msg:{tone:"empty", icon:"clock",
+        title:"等待首轮采样", why:"约 60 秒后自动出现"}},
+      {agent:"claude", phase:"msg", status:"idle", msg:{tone:"empty", icon:"inbox",
+        title:"statusline 未写入", why:"跑一次 claude 会话即可补上"}},
+      {agent:"zcode", phase:"msg", status:"offline", msg:ZCODE_OFF}],
+    feed:{phase:"msg", msg:{tone:"empty", icon:"inbox", title:"今天还没有完成的任务",
+      why:"有任务跑完会自动排到这里"}}}),
+  error: () => ({tiles:[
+      {agent:"codex", phase:"msg", status:"offline", msg:{tone:"error", icon:"lock",
+        title:"额度接口 401", why:"登录令牌过期，跑 codex login 重新授权"}},
+      {agent:"claude", phase:"msg", status:"offline", msg:{tone:"error", icon:"hour",
+        title:"接口限流 429", why:"已退避重试，期间读 statusline 缓存"}},
+      {agent:"zcode", phase:"msg", status:"offline", msg:{tone:"error", icon:"wifi",
+        title:"网络不可达", why:"恢复联网后自动重连，不用操作"}}],
+    feed:{phase:"msg", msg:{tone:"error", icon:"radio", title:"事件采集中断",
+      why:"30 秒后自动重新挂载，期间事件会补齐"}}}),
+  edge: () => ({tiles:[
+      {agent:"codex", phase:"ok", status:"idle", windows:[
+        {label:"5h", usedPercent:97, resetsAt:"2026-09-14T16:35:48+08:00"}, CODEX_OK[1]]},
+      {agent:"claude", phase:"ok", status:"idle", windows:[
+        {label:"5h", usedPercent:82, resetsAt:CLAUDE_OK[0].resetsAt}, CLAUDE_OK[1]]},
+      {agent:"zcode", phase:"ok", status:"idle", windows:ZCODE_OK}],
+    feed:{phase:"ok", items:EDGE_FEED.map(x => ({...x}))}}),
+  attention: () => ({tiles:[
+      {agent:"codex",  phase:"ok", status:"idle", windows:CODEX_OK},
+      {agent:"claude", phase:"ok", status:"attention", windows:CLAUDE_OK},
+      {agent:"zcode",  phase:"ok", status:"idle", windows:ZCODE_OK}],
+    feed:{phase:"ok", items:[{...ATTN_ITEM}, ...BASE_FEED.slice(1, 4).map(x => ({...x, unread:false}))]}}),
+  running: () => ({tiles:[
+      {agent:"codex",  phase:"ok", status:"running", windows:CODEX_OK},
+      {agent:"claude", phase:"ok", status:"running", windows:CLAUDE_OK},
+      {agent:"zcode",  phase:"ok", status:"idle", windows:ZCODE_OK}],
+    feed:{phase:"ok", items:[
+      {id:"run1", agent:"codex", kind:"running", unread:false,
+       title:"构造 v0.3 盲判任务分类样本", summary:"已处理 412 / 710 条",
+       startedAt:"2026-09-14T14:29:09+08:00", at:"2026-09-14T14:29:09+08:00"},
+      ...BASE_FEED.slice(1, 4).map((x,i) => ({...x, unread:i === 0}))]}}),
+};
+
+const ROW_BUDGET = 4;                       /* C 页：1 放大 + 3 行，简报是 3–4 条 */
+const ORDER = ["a", "b", "c"];
+
+const root = document.documentElement;
+const el = {
+  paTiles:document.getElementById("paTiles"), pbBands:document.getElementById("pbBands"),
+  pcFeed:document.getElementById("pcFeed"),   paAttn:document.getElementById("paAttn"),
+  feedTitle:document.getElementById("feedTitle"), dots:document.getElementById("dots"),
+  legend:document.getElementById("legend"), live:document.getElementById("live"),
+  meter:document.getElementById("meter"), unread:document.getElementById("unread"),
+  topLoading:document.getElementById("topLoading"),
+};
+const LS = {get:(k,d)=>{try{return localStorage.getItem(k) ?? d}catch(e){return d}},
+            set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}}};
+
+let state  = LS.get("am.state","populated");
+let rm     = LS.get("am.rm","0");
+let rotate = LS.get("am.rotate","1") === "1";
+let page   = LS.get("am.page","a");
+if (!SCENES[state]) state = "populated";
+if (!["a","b","c","attn"].includes(page)) page = "a";
+let scene = null;
+let attnActive = false;                     /* attention 接管中 */
+let dwellUntil = 0;                         /* 当前页的到期时刻（真实毫秒） */
+let eventHold = false;                      /* 新事件把 C 页钉住 */
+let manualHold = 0;                         /* R5-13 · 手动切页的宽限到期时刻 */
+
+const cssMs = name => {
+  const v = getComputedStyle(root).getPropertyValue(name).trim();
+  return v.endsWith("ms") ? parseFloat(v) : parseFloat(v) * 1000;
+};
+const DWELL = () => ({a:cssMs("--dwell-a"), b:cssMs("--dwell-b"), c:cssMs("--dwell-c")});
+
+const CAPTIONS = {
+  a:"<b>A 总览 — 还剩多少。</b>三块瓦片横排，64px 百分比是全屏唯一能从座位上一眼读到的东西；7d 不显示，倒计时提到 18px。停留 10s —— 它是回归页，占掉一轮 22s 的将近一半，随机一瞥才有足够概率命中它。",
+  b:"<b>B 额度详情 — 够不够撑到重置。</b>三条竖向时间带，填充与「现在」游标画在同一根轴上，右端是重置刻度；判语只留结论「按这个速度用不完 / 会提前用尽」。停留 6s。",
+  c:"<b>C 事件 — 谁刚做完。</b>最新一条 20px 单行放大 + 三行 16px；没有未读计数、没有「另 N 条更早」，未读只靠最新行自己的强调表达。停留 6s；新事件进来立刻跳到这里并停 20s。",
+  attn:"<b>attention — 谁在等我。</b>整屏专用页接管，轮播暂停直到解除。28px「等待你」+ 18px 一句话说明 + 等了多久。这是全屏唯一会打断轮播的状态。",
+};
+
+/* ---------- 渲染：A 页 ---------- */
+function footIcon(t, lv){
+  if (t.status === "attention") return "ret";
+  if (lv !== "ok")              return "alert";
+  if (t.status === "running")   return "dot";
+  return "clock";
+}
+const msgBlock = m => `<div class="msg" data-tone="${m.tone}">
+  <div class="msg-head">${svg(m.icon,15)}<span>${esc(m.title)}</span></div>
+  <p>${esc(m.why)}</p></div>`;
+
+function renderPageA(){
+  el.paTiles.innerHTML = scene.tiles.map(t => {
+    const a = AGENTS[t.agent];
+    const lv = t.phase === "ok" ? level(t.windows[0].usedPercent) : "ok";
+    const head = `<div class="tile-head"><h2 class="tile-name">${esc(a.name)}</h2>` +
+      `<span class="iddot"${t.status === "offline" ? ' data-off="1"' : ""}></span></div>`;
+    let body;
+    if (t.phase === "loading") body = `<div class="skel"><i style="height:44px;width:70%"></i>
+        <i style="height:18px;width:48%"></i><span class="loading-label sr" role="status">读取中</span></div>`;
+    else if (t.phase === "msg") body = msgBlock(t.msg);
+    else {
+      const w5 = t.windows[0];
+      body = `<div class="a-body"><div class="a-nums" data-wide="${w5.usedPercent >= 100 ? 1 : 0}">
+          <span class="num">${w5.usedPercent}</span><span class="unit">%</span></div></div>
+        <div class="tile-foot" data-level="${lv}" data-status="${t.status}">${svg(footIcon(t, lv), 15)}<span
+          class="cd mono" data-foot="${esc(w5.resetsAt)}" data-level="${lv}" data-status="${t.status}"></span><span
+          class="word" data-word="${lv}|${t.status}"></span></div>`;
+    }
+    return `<section class="tile" data-status="${t.status}" data-level="${lv}" style="--idc:${a.color}" ` +
+           `aria-label="${esc(a.name)} 额度">${head}${body}</section>`;
+  }).join("");
+}
+
+/* ---------- 渲染：B 页 ---------- */
+function renderPageB(){
+  el.pbBands.innerHTML = scene.tiles.map(t => {
+    const a = AGENTS[t.agent];
+    const lv = t.phase === "ok" ? level(t.windows[0].usedPercent) : "ok";
+    const nameCell = `<h2 class="b-name"><span class="iddot"${t.phase === "ok" ? "" : ' data-off="1"'}></span><span class="t">${esc(a.name)}</span></h2>`;
+    let inner;
+    if (t.phase === "loading")
+      inner = `<div class="b-head">${nameCell}<span class="b-verdict"><span class="loading-label sr" role="status">读取中</span></span></div>
+        <div class="skel" style="flex:none"><i style="height:12px"></i></div>`;
+    else if (t.phase === "msg")
+      /* R5-03 · 原因 + 下一步塞进判语那一行会被单行省略号截掉「下一步」。
+         回到两行：判语行只放标题，14px 的原因行独立一行（每条 64.7px 放得下）。
+         R5-15 · 只有标题与图标是 --danger，中性的下一步降到 --body，
+         否则三条并排就是整屏三行红字。 */
+      inner = `<div class="b-head">${nameCell}<span class="b-verdict" data-tone="${t.msg.tone === "error" ? "error" : "mute"}">${
+        svg(t.msg.icon,14)} ${esc(t.msg.title)}</span></div>
+        <div class="b-note">${esc(t.msg.why)}</div>`;
+    else {
+      const w5 = t.windows[0], w7 = t.windows[1];
+      const start = new Date(w5.resetsAt).getTime() - WIN5H;
+      inner = `<div class="b-head">${nameCell}
+        <span class="b-verdict" data-verdict="${start}" data-used="${w5.usedPercent}" data-status="${t.status}"></span>
+        <span class="b-pc mono">${w5.usedPercent}%</span>
+        ${w7 ? `<span class="b-sec mono">${esc(w7.label)} ${w7.usedPercent}%</span>` : ""}
+        <span class="b-cd mono" data-cd="${esc(w5.resetsAt)}"></span></div>
+        <div class="bandbox">
+          <div class="band" role="img" aria-label="5h 窗已用 ${w5.usedPercent}%，右端为重置点">
+            <span class="used" style="width:${w5.usedPercent}%"></span>
+            <span class="caret" data-caret="${start}"></span></div>
+          <span class="resettick"></span></div>`;
+    }
+    return `<section class="tile" data-status="${t.status}" data-level="${lv}" style="--idc:${a.color}" ` +
+           `aria-label="${esc(a.name)} 额度">${inner}</section>`;
+  }).join("");
+}
+
+/* ---------- 渲染：C 页 ---------- */
+function rowHTML(it, isLead, aged){
+  const a = AGENTS[it.agent];
+  const icon = it.kind === "failed" ? "alert" : it.kind === "attention" ? "ret"
+             : it.kind === "running" ? "dot" : "check";
+  const timeAttr = it.kind === "running" ? `data-elapsed="${esc(it.startedAt)}"` : `data-when="${esc(it.at)}"`;
+  const when = it.kind === "running"
+    ? elapsedFmt(now() - new Date(it.startedAt).getTime()) : whenFmt(it.at, now());
+  const label = `${a.name} · ${KIND_LABEL[it.kind] || KIND_LABEL.completed} · ${it.title} · ${when}` +
+                (it.unread ? " · 未读，按 Enter 标记已读" : "");
+  const first = it.kind === "attention"
+    ? `<span class="attn-tag">${svg("ret",13)}等待你</span>`
+    : `<span class="chip">${esc(a.tag)}</span>`;
+  return `<button type="button" class="row${isLead ? " lead" : ""}" data-id="${esc(it.id)}" ` +
+    `data-kind="${it.kind}" data-unread="${it.unread ? 1 : 0}" data-aged="${aged ? 1 : 0}" ` +
+    `style="--idc:${a.color}" aria-label="${esc(label)}">` +
+    first + `<span class="rtitle">${esc(it.title)}</span>` +
+    `<span class="rtime" ${timeAttr}></span>` +
+    `<span class="rkind" data-kind="${it.kind}">${svg(icon,14)}</span>` +
+    `<span class="rmark"></span></button>`;
+}
+function renderPageC(){
+  const f = scene.feed;
+  el.feedTitle.textContent = FEED_TITLE[state] || "最近完成";
+  if (f.phase === "loading"){
+    el.pcFeed.innerHTML = `<div class="feed-skel"><i></i><i></i><i></i>
+      <span class="loading-label" role="status" style="padding:4px 8px 0">读取中</span></div>`;
+    return;
+  }
+  if (f.phase === "msg"){
+    el.pcFeed.innerHTML = `<div class="feed-msg msg" data-tone="${f.msg.tone}">
+      <div class="msg-head">${svg(f.msg.icon,15)}<span>${esc(f.msg.title)}</span></div>
+      <p>${esc(f.msg.why)}</p></div>`;
+    return;
+  }
+  const shown = f.items.slice(0, ROW_BUDGET);
+  const attn = shown.some(x => x.kind === "attention");
+  let spent = false;
+  el.pcFeed.innerHTML = shown.map((it, i) => {
+    const full = !spent && (attn ? it.kind === "attention" : it.unread);
+    if (full) spent = true;
+    return rowHTML(it, i === 0, it.unread && !full);
+  }).join("");
+  tickFeed();
+}
+
+/* ---------- 渲染：attention 页 ---------- */
+function attnItem(){
+  return scene.feed.items ? scene.feed.items.find(x => x.kind === "attention" && x.unread) : null;
+}
+function renderPageAttn(){
+  const it = attnItem();
+  if (!it){
+    el.paAttn.innerHTML = `<div class="feed-msg msg" data-tone="empty">
+      <div class="msg-head">${svg("check",15)}<span>没有等待你的事</span></div>
+      <p>有 agent 请求批准时，这一页会接管整屏并暂停轮播。</p></div>`;
+    return;
+  }
+  const a = AGENTS[it.agent];
+  el.paAttn.innerHTML = `<div class="attn-card" style="--idc:${a.color}">
+    <span class="attn-dot"></span>
+    <span class="attn-who">${esc(a.tag)}</span>
+    <span class="attn-lead">${svg("ret",26)}等待你</span>
+    <span class="attn-what">${esc(it.title)}</span>
+    <span class="attn-meta"><span>${esc(it.summary || "")}</span>
+      <span class="mono" data-elapsed2="${esc(it.at)}"></span></span></div>`;
+}
+
+/* ---------- 逐秒增量更新 ---------- */
+function tickClocks(){
+  const txt = hhmm(new Date(now()));
+  document.querySelectorAll("[data-clock]").forEach(n => n.textContent = txt);
+}
+function tickTiles(){
+  const t = now();
+  document.querySelectorAll("[data-foot]").forEach(n => {
+    const st = n.dataset.status;
+    n.textContent = st === "attention" ? "" : countdown(n.dataset.foot, t);
+  });
+  document.querySelectorAll("[data-word]").forEach(n => {
+    const [lv, st] = n.dataset.word.split("|");
+    n.textContent =
+      st === "attention" ? "等待你批准"
+      : lv === "danger"  ? "吃紧"
+      : lv === "warn"    ? "偏紧"
+      : st === "running" ? "运行中"
+      :                    "后重置";
+  });
+  document.querySelectorAll("[data-cd]").forEach(n => n.textContent = countdown(n.dataset.cd, t));
+  document.querySelectorAll("[data-caret]").forEach(n => {
+    const pct = Math.max(0, Math.min(100, ((t - Number(n.dataset.caret)) / WIN5H) * 100));
+    n.style.left = pct.toFixed(2) + "%";
+  });
+  document.querySelectorAll("[data-verdict]").forEach(n => {
+    const pct = Math.max(0, Math.min(100, ((t - Number(n.dataset.verdict)) / WIN5H) * 100));
+    const used = Number(n.dataset.used), over = used > pct, st = n.dataset.status;
+    if (st === "attention"){ n.dataset.tone = "attn"; n.textContent = "等待你批准"; return; }
+    n.dataset.tone = over ? "over" : "under";
+    const verdict = over ? "按这个速度会提前用尽" : "按这个速度用不完";
+    n.textContent = st === "running" ? `运行中 · ${verdict}` : verdict;
+  });
+}
+function tickFeed(){
+  const t = now();
+  document.querySelectorAll("[data-when]").forEach(n => n.textContent = whenFmt(n.dataset.when, t));
+  document.querySelectorAll("[data-elapsed]").forEach(n =>
+    n.textContent = elapsedFmt(t - new Date(n.dataset.elapsed).getTime()));
+  document.querySelectorAll("[data-elapsed2]").forEach(n =>
+    n.textContent = "已等 " + elapsedFmt(t - new Date(n.dataset.elapsed2).getTime()));
+}
+
+/* ---------- 跨阈值播报 ---------- */
+const lastLevel = {};
+function announceThresholds(){
+  scene.tiles.forEach(t => {
+    if (t.phase !== "ok"){ lastLevel[t.agent] = null; return; }
+    const w = t.windows[0], lv = level(w.usedPercent), prev = lastLevel[t.agent];
+    if (prev && prev !== lv && lv !== "ok")
+      el.live.textContent = `${AGENTS[t.agent].name} 5h 额度已达 ${w.usedPercent}%，` +
+        (lv === "danger" ? "余量吃紧" : "余量偏紧");
+    lastLevel[t.agent] = lv;
+  });
+}
+
+/* ---------- 轮播 ---------- */
+/* 三页一律 --dwell-*（默认 60s）。「空闲加速」已作废：慢轮播之后回归不靠频率，
+   靠的是打断——新事件与 attention 会主动把该看的推到眼前。 */
+function dwellFor(p){
+  if (p === "c" && eventHold) return cssMs("--dwell-event");
+  const d = DWELL();
+  return p === "a" ? d.a : p === "b" ? d.b : d.c;
+}
+
+function showPage(p, {reset = true} = {}){
+  page = p;
+  root.dataset.page = p;
+  document.querySelectorAll(".page").forEach(n => {
+    const on = n.dataset.p === p;
+    n.dataset.on = on ? "1" : "0";
+    /* R5-01 · inert 是主机制：aria-hidden 只挡无障碍树，挡不住 Tab。
+       隐藏页里的事件行原本仍可聚焦，焦点会掉到看不见的地方。 */
+    n.inert = !on;
+    n.setAttribute("aria-hidden", on ? "false" : "true");
+  });
+  /* attention 页三点全暗，读作「当前不在轮播的三页里」—— 这本身就是状态信息 */
+  [...el.dots.children].forEach((n, i) => n.dataset.on = ORDER[i] === p ? "1" : "0");
+  if (reset) dwellUntil = Date.now() + dwellFor(p);
+  syncTopbar();
+  syncSegs();
+  el.legend.innerHTML = CAPTIONS[p];
+}
+
+function rotateTick(){
+  if (!rotate) return;
+  /* R5-13 · attention 接管期间原本 100ms 内就把手动选择抢回 attn，
+     评审者没法用控制栏核对其它页。给手动切页 10s 宽限（工具层，不进画布）。 */
+  if (attnActive){ if (Date.now() > manualHold) showPage("attn", {reset:false}); return; }
+  if (Date.now() < dwellUntil) return;
+  if (page === "c" && eventHold) eventHold = false;   /* 20s 钉住到期 */
+  const i = ORDER.indexOf(page);
+  showPage(ORDER[(i < 0 ? 0 : i + 1) % ORDER.length]);
+}
+
+function updateMeter(){
+  const left = Math.max(0, dwellUntil - Date.now()) / 1000;
+  const leftTxt = left >= 10 ? Math.ceil(left) : left.toFixed(1);
+  const tag = attnActive ? "attention 接管 · 轮播暂停"
+            : !rotate     ? "轮播关闭"
+            : page === "attn" ? "attention"
+            : `${page.toUpperCase()}${eventHold && page === "c" ? " · 新事件钉住" : ""} · ${leftTxt}s`;
+  el.meter.textContent = tag;
+}
+
+/* R5-07 · 轮播之后 A / B / C 是三个不同的时刻，把唯一那处可见的「读取中」放在 C 页
+   等于 A / B 的 loading 态一个字都没有。挪到顶栏：它对三页都在，且不占瓦片预算。
+   R3-16 · 未读数同槽，只在 A / B 页且 >0 时出现。 */
+function syncTopbar(){
+  el.topLoading.hidden = state !== "loading";
+  const items = scene && scene.feed.items ? scene.feed.items : [];
+  const unread = items.filter(x => x.unread).length;
+  el.unread.textContent = (unread > 0 && (page === "a" || page === "b")) ? `· ${unread}` : "";
+}
+
+/* ---------- 渲染入口 ---------- */
+function render(){
+  scene = SCENES[state]();
+  root.dataset.state = state;
+  attnActive = !!attnItem();
+  renderPageA(); renderPageB(); renderPageC(); renderPageAttn();
+  tickTiles(); tickFeed(); tickClocks();
+  announceThresholds();
+  if (state === "loading") el.live.textContent = "正在读取三个 agent 的额度与事件";
+  if (attnActive && rotate) showPage("attn", {reset:false});
+  else showPage(page === "attn" && !attnActive ? "a" : page);
+  syncTopbar();
+}
+
+/* ---------- 提示音 ---------- */
+let ac = null;
+function chime(){
+  if (rm === "1") return;
+  try{
+    ac = ac || new (window.AudioContext || window.webkitAudioContext)();
+    if (ac.state === "suspended") ac.resume();
+    const t = ac.currentTime, g = ac.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.055, t + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+    g.connect(ac.destination);
+    [[784,1],[1174.7,.5]].forEach(([f,m]) => {
+      const o = ac.createOscillator(), og = ac.createGain();
+      o.type = "sine"; o.frequency.setValueAtTime(f, t);
+      og.gain.setValueAtTime(m, t); o.connect(og); og.connect(g); o.start(t); o.stop(t + 0.2);
+    });
+  }catch(e){}
+}
+
+/* ---------- 打断 2 · 新事件 ---------- */
+const POOL = [
+  {agent:"codex",  title:"把 rollout jsonl 的增量解析补上 fixture 回归", summary:"新增 6 个解析用例，全部通过"},
+  {agent:"claude", title:"给 statusline 包一层 tee，把 rate_limits 落盘", summary:"脚本已就位，settings.json 已备份"},
+  {agent:"zcode",  title:"训练集 b4 批次转写完成", summary:"本批 68 条，去重后 64 条入库"},
+  {agent:"codex",  title:"核对智谱 quota/limit 的 unit 枚举", summary:"3 = 小时、6 = 周，已确认"},
+  {agent:"claude", title:"副屏窗口热插拔迁移的 displays.ts 草稿", summary:"按 label 优先、尺寸次之重新定位"},
+];
+let seq = 0;
+const motionOn = () => rm !== "1" && !matchMedia("(prefers-reduced-motion:reduce)").matches;
+
+function pushEvent(){
+  if (!scene.feed.items){ state = "populated"; LS.set("am.state", state); render(); }
+  const s = POOL[seq++ % POOL.length];
+  const item = {id:"new"+seq+"-"+Date.now(), agent:s.agent, kind:"completed",
+    title:s.title, summary:s.summary, at:new Date(now()).toISOString(), unread:true};
+  const anim = motionOn(), before = new Map();
+  if (anim) el.pcFeed.querySelectorAll(".row").forEach(r => before.set(r.dataset.id, r.getBoundingClientRect().top));
+  scene.feed.items.unshift(item);
+  eventHold = true;
+  renderPageC();
+  /* 立刻跳到 C 页并停 --dwell-event；期间再来一条会重置这 20s */
+  showPage("c");
+  if (anim) el.pcFeed.querySelectorAll(".row").forEach(r => {
+    const prev = before.get(r.dataset.id);
+    if (prev == null){ r.classList.add("enter"); return; }
+    const d = prev - r.getBoundingClientRect().top;
+    if (!d) return;
+    r.style.transition = "none"; r.style.transform = `translateY(${d}px)`;
+    requestAnimationFrame(() => {
+      r.style.transition = "transform var(--dur-event) var(--ease-standard)"; r.style.transform = "";
+    });
+  });
+  chime();
+  el.live.textContent = `新事件：${AGENTS[item.agent].name} ${item.title}`;
+}
+
+/* ---------- 打断 1 · attention ---------- */
+function toggleAttn(){
+  if (!scene.feed.items){ state = "populated"; LS.set("am.state", state); render(); }
+  const existing = scene.feed.items.findIndex(x => x.kind === "attention");
+  if (existing >= 0){                      /* 再点一次 = 解除接管 */
+    scene.feed.items.splice(existing, 1);
+    attnActive = false; eventHold = false;
+    renderPageC(); renderPageAttn();
+    showPage("a");
+    el.live.textContent = "等待批准已解除";
+    return;
+  }
+  scene.feed.items.unshift({...ATTN_ITEM, id:"attn-" + Date.now(), at:new Date(now()).toISOString()});
+  attnActive = true;
+  renderPageC(); renderPageAttn();
+  showPage("attn", {reset:false});
+  chime();
+  el.live.textContent = "需要你批准：" + ATTN_ITEM.title;
+}
+
+/* ---------- ack ---------- */
+el.pcFeed.addEventListener("click", e => {
+  const row = e.target.closest(".row");
+  if (!row || !scene.feed.items) return;
+  const it = scene.feed.items.find(x => x.id === row.dataset.id);
+  if (!it || !it.unread) return;
+  it.unread = false;
+  const wasAttn = it.kind === "attention";
+  renderPageC(); renderPageAttn();
+  if (wasAttn){ attnActive = false; showPage("a"); el.live.textContent = "已批准，轮播恢复"; return; }
+  const again = el.pcFeed.querySelector(`.row[data-id="${CSS.escape(it.id)}"]`);
+  if (again) again.focus();
+  const left = scene.feed.items.filter(x => x.unread).length;
+  el.live.textContent = left ? `已标记已读，还剩 ${left} 条未读` : "已全部读完";
+});
+
+/* ---------- 控制栏 ---------- */
+function syncSegs(){
+  document.querySelectorAll("#segPage button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.p === page)));
+  document.querySelectorAll("#segState button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.s === state)));
+}
+document.getElementById("segPage").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  LS.set("am.page", b.dataset.p);
+  manualHold = Date.now() + 10000;
+  showPage(b.dataset.p);
+});
+document.getElementById("segState").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  state = b.dataset.s; LS.set("am.state", state);
+  eventHold = false;
+  render();
+});
+document.getElementById("btnPush").addEventListener("click", pushEvent);
+document.getElementById("btnAttn").addEventListener("click", toggleAttn);
+const chkRotate = document.getElementById("chkRotate");
+chkRotate.addEventListener("change", () => {
+  rotate = chkRotate.checked; LS.set("am.rotate", rotate ? "1" : "0");
+  root.dataset.rotate = rotate ? "1" : "0";   /* R5-14 · 原来只在初始化写一次，值会变错 */
+  if (rotate) dwellUntil = Date.now() + dwellFor(page);
+  updateMeter();
+});
+const chk = document.getElementById("chkRm");
+chk.addEventListener("change", () => { rm = chk.checked ? "1" : "0"; root.dataset.rm = rm; LS.set("am.rm", rm); });
+
+/* ==========================================================================
+   纯净模式：?pure=1 或按 P 进入 / Esc 或再按 P 退出
+   Fullscreen API 必须由用户手势触发，所以 ?pure=1 打开时先挂一行提示，
+   按任意键再请求全屏——提示只出现这一次。
+   纯净模式下轮播强制开、忽略 localStorage 里的手动选页；键盘 ack 与指示点保留。
+   ========================================================================== */
+const pureHint = document.getElementById("pureHint");
+let pure = false, rotateBeforePure = rotate;
+
+function setPure(on, {fs = true} = {}){
+  if (pure === on) return;
+  pure = on;
+  root.dataset.pure = on ? "1" : "0";
+  if (on){
+    rotateBeforePure = rotate;
+    rotate = true; chkRotate.checked = true; root.dataset.rotate = "1";
+    showPage("a");                       /* 忽略 localStorage 的手动选页 */
+    if (fs) requestFs();
+  } else {
+    rotate = rotateBeforePure; chkRotate.checked = rotate;
+    root.dataset.rotate = rotate ? "1" : "0";
+    pureHint.hidden = true;
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  }
+  updateMeter();
+}
+function requestFs(){
+  if (document.fullscreenElement) return;
+  const el0 = document.documentElement;
+  (el0.requestFullscreen ? el0.requestFullscreen() : Promise.reject()).catch(() => {
+    /* 被拒绝也不影响纯净模式本身：控制栏已经隐藏，画布已经居中 */
+  });
+}
+/* 用户按 Esc 退出浏览器全屏时，同步退回调试视图 */
+document.addEventListener("fullscreenchange", () => {
+  if (!document.fullscreenElement && pure) setPure(false);
+});
+document.addEventListener("keydown", e => {
+  if (pureHint.hidden === false){        /* 等手势的那一刻：任意键都算 */
+    pureHint.hidden = true;
+    requestFs();
+    e.preventDefault();
+    return;
+  }
+  if (e.key === "p" || e.key === "P"){
+    const t = e.target;
+    const typing = t instanceof HTMLElement &&
+      (t.isContentEditable || t.tagName === "TEXTAREA" ||
+       (t.tagName === "INPUT" && !["checkbox","radio","button","submit"].includes(t.type)));
+    if (typing) return;                  /* 只给真正会打字的地方让路 */
+    setPure(!pure);
+    e.preventDefault();
+  } else if (e.key === "Escape" && pure){
+    setPure(false);
+  }
+});
+document.getElementById("btnPure").addEventListener("click", () => setPure(true));
+
+chk.checked = rm === "1";
+chkRotate.checked = rotate;
+root.dataset.rm = rm;
+root.dataset.rotate = rotate ? "1" : "0";
+render();
+dwellUntil = Date.now() + dwellFor(page);
+if (new URLSearchParams(location.search).get("pure") === "1"){
+  setPure(true, {fs:false});             /* 全屏要等手势，先只切视觉 */
+  pureHint.hidden = false;
+}
+setInterval(() => { tickClocks(); tickTiles(); tickFeed(); }, 1000);
+setInterval(() => { rotateTick(); updateMeter(); }, 100);
+})();
+</script>
+</body>
+</html>

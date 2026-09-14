@@ -1,0 +1,323 @@
+/* =============================================================================
+   Agent Monitor — design tokens
+   Layer 1  extracted verbatim from DESIGN.md (raycast) via design-system-extract
+   Layer 2  project layer for the 960×540 @2x secondary display
+   Naming is by PURPOSE, not by hue. Findings are at the bottom of this file.
+   ========================================================================== */
+
+:root {
+  /* ==========================================================================
+     1 · SURFACE LADDER — extracted (DESIGN.md › Colors › Surface)
+     Elevation in this system is a background-color ladder, never a shadow.
+     Each notch lighter reads as one step closer to the viewer.
+     ====================================================================== */
+  --canvas:            #07080a;  /* page ground, the dominant surface        */
+  --surface:           #0d0d0d;  /* card / panel — one notch above canvas    */
+  --surface-elevated:  #101111;  /* input fill, inactive track, active chip  */
+  --surface-card:      #121212;  /* top notch — unread row, keycap, hover    */
+
+  /* ==========================================================================
+     2 · HAIRLINES — extracted (DESIGN.md › Elevation & Depth)
+     ====================================================================== */
+  --hairline:          #242728;               /* universal 1px card edge     */
+  --hairline-soft:     rgba(255,255,255,.08); /* over-image / translucent    */
+  --hairline-strong:   rgba(255,255,255,.16); /* stronger inline divider     */
+
+  /* ==========================================================================
+     3 · TEXT — extracted (DESIGN.md › Colors › Text)
+     Contrast measured against --surface #0d0d0d (worst realistic case here):
+       ink 17.69:1 · charcoal 12.99:1 · body 12.23:1 · mute 7.09:1
+       ash 3.64:1  · stone 1.97:1
+     ====================================================================== */
+  --ink:               #f4f4f6;  /* headline / primary numerals             */
+  --charcoal:          #d3d3d4;  /* body where ink reads too soft           */
+  --body:              #cdcdcd;  /* default running text, bar fills         */
+  --mute:              #9c9c9d;  /* metadata, labels, timestamps  (≥12px ok)*/
+  --ash:               #6a6b6c;  /* 3.64:1 — NON-INFORMATIONAL MARKS ONLY   */
+  --stone:             #434345;  /* 1.97:1 — never text; inactive track only*/
+
+  /* ==========================================================================
+     4 · SEMANTIC — extracted (DESIGN.md › Colors › Semantic)
+     raycast scopes these to illustrations; this project promotes them to
+     quota thresholds only (see §7). They are NOT accent.
+     ====================================================================== */
+  --ok:                #59d499;
+  --warn:              #ffc533;
+  --danger:            #ff6161;
+  --info:              #57c1ff;
+  --ok-soft:           rgba(89,212,153,.15);
+  --warn-soft:         rgba(255,197,51,.15);
+  --danger-soft:       rgba(255,97,97,.15);
+
+  /* ==========================================================================
+     5 · ACCENT — extracted (DESIGN.md: "white IS the brand action")
+     The only true accent in the system. In this project it is rationed to
+     「未读 / 需要你」 and capped at 2 visible uses per screen.
+     ====================================================================== */
+  --accent:            #f4f4f6;
+  --accent-dim:        rgba(244,244,246,.55);  /* aged unread — see §7       */
+
+  /* ==========================================================================
+     6 · RADIUS + SPACING — extracted (DESIGN.md › Shapes / Layout)
+     ====================================================================== */
+  --r-xs: 4px;  --r-sm: 6px;  --r-md: 8px;  --r-lg: 10px;  --r-full: 9999px;
+
+  --sp-xxs: 2px; --sp-xs: 4px; --sp-sm: 8px;  --sp-md: 12px;
+  --sp-lg: 16px; --sp-xl: 24px; --sp-xxl: 32px;
+
+  /* SPACING EXCEPTIONS — 第三次重写（R5-05）。前两版都与实现失配，所以这次不再
+     手写清单，而是把它做成断言：design/verify.mjs 每格都会扫描 stage 内全部计算出的
+     gap / rowGap / columnGap / padding* / margin*，凡不落在上面这条标度上的一律报错。
+     **当前实测集合为空**——轮播版里没有任何 off-scale 的间距。
+     两条随之而来的纪律：
+       · 不用 margin:auto 做分布。getComputedStyle 会把它解析成一个巨大的 used value
+         （实测 371.58px），在这条断言里读起来像野值；改用显式的 grid-column。
+       · --dot 6px / --quota-notch-w 2px / caret 2px 是**尺寸**不是间距，不在扫描范围内，
+         它们的理由写在 §12 各自的 token 注释里。
+     清单要是再和实现对不上，那是断言坏了，不是清单旧了。 */
+
+  /* ==========================================================================
+     7 · PROJECT · IDENTITY COLORS  (added — DESIGN.md has no multi-brand slot)
+     Categorical, not accent. Allowed on badges, dots and the V2 progress arc.
+     Never on a fill wider than the arc stroke.
+     ZCode is 智谱 #3b6cff re-plotted in OKLCH at Claude's exact L and C so no
+     agent out-shouts another:  L .6724  C .1308  H 265.6  →  #6f93e6
+     Measured on --surface: claude 6.23:1 · zcode 6.47:1 · codex 12.99:1
+
+     REVISION 1 (lead, post-review · R1-01 / R1-03 / R2-11): Codex was #f4f4f6,
+     the same hex as --accent, so every Codex dot counted as a visual accent and
+     the attention state showed three equal-brightness white marks. Demoted to
+     --charcoal, still neutral-white, half a step below accent. This also gives
+     --charcoal a job (it was the one extracted-but-unused token, R1-08).
+     ====================================================================== */
+  --id-codex:          var(--charcoal);   /* #d3d3d4 */
+  --id-claude:         #d97757;
+  --id-zcode:          #6f93e6;
+
+  /* ==========================================================================
+     8 · PROJECT · QUOTA THRESHOLDS (added)
+     ====================================================================== */
+  --quota-normal:      var(--body);
+  --quota-warn:        var(--warn);   /* ≥80% */
+  --quota-danger:      var(--danger); /* ≥95% */
+  /* REVISION 2 (lead, post-review · R1-02 / R2-01 / R2-08): every track-shaped
+     graphic (V1 bar track, V2 gauge arc track, V3 band track, V3 timeline nodes)
+     moves to --ash. --hairline measured 1.29:1 and --stone 1.97:1 against
+     --surface; WCAG 1.4.11 puts a hard 3:1 floor on non-text UI components that
+     carry information, and a track carries "how long is the whole thing".
+     --ash is 3.64:1 on --surface and 3.75:1 on --canvas. The fills that ride on
+     these tracks move to --ink so the fill edge keeps a 4.86:1 boundary. */
+  --quota-track:       var(--ash);
+  /* REVISION 4 (R3-03 / R4-03): the fill was --ink — the same hex as --accent.
+     Measured in V3's populated state the two fills covered 1768 px² while the
+     unread dot covered 25 px²: a 70:1 ratio, i.e. the brightest, largest shape
+     on the screen was quota, not "someone needs you". Accent only works because
+     it is scarce. Demoted to --charcoal: 3.57:1 against the --ash track, still
+     over the 3:1 floor, and half a step below accent — the same move Q1 made on
+     --id-codex, so the system stays self-consistent. */
+  --quota-fill:        var(--charcoal);
+  /* REVISION 4 (R3-01 / R3-02 / R4-02 / R4-04): every fill now ends in a 2px
+     --canvas notch, the same mechanism as V3's "now" caret. Raising the track to
+     --ash fixed track-vs-background but broke fill-vs-track in the danger tier
+     (--danger on --ash measured 1.81:1). Colour cannot carry that boundary
+     across three semantic tiers, so shape does: the notch measures 18.24:1 on
+     ink, 13.39 on charcoal, 12.68 on warn, 6.81 on danger and 3.75 on the bare
+     track — constant and tier-independent. Semantic red/yellow are untouched. */
+  --quota-notch:       var(--canvas);
+  --quota-notch-w:     2px;
+  --quota-warn-at:     80;
+  --quota-danger-at:   95;
+
+  /* ==========================================================================
+     9 · TYPOGRAPHY FAMILIES
+     Inter extracted from DESIGN.md, ss03 mandatory ("without it the chrome
+     loses its signature voice"). IBM Plex Mono added for numerals only —
+     the single deliberate deviation, justified in 00-designer-notes.md.
+     ====================================================================== */
+  --font-sans: "Inter", "Inter Fallback", -apple-system, BlinkMacSystemFont,
+               "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+               "Microsoft YaHei", system-ui, sans-serif;
+  --font-num:  "IBM Plex Mono", ui-monospace, SFMono-Regular, "SF Mono",
+               Menlo, Consolas, "Liberation Mono", monospace;
+  --font-features: "calt" 1, "kern" 1, "liga" 1, "ss03" 1;
+  --num-features: "tnum" 1, "zero" 1;   /* tabular figures + slashed zero    */
+
+  /* ==========================================================================
+     10 · PROJECT · TYPE SCALE for the 480×270 canvas (zoom 2 → 960×540)
+     REVISION 3 (3.5" panel, brief-m0-35.md). The panel measured 3.5 inches,
+     not 7: 1920×1080 physical on a 3.5" diagonal is ~629 ppi, so one canvas
+     CSS px (= 4×4 physical px after zoom 2) is 0.16 mm — about 0.6× the
+     0.26 mm of a px on an ordinary desktop monitor. The user compared 1x /
+     1.5x / 2x on the real panel and picked 2x.
+     Consequence: the scale is NOT the 960 scale halved. It is re-cut around
+     the fact that only the big numeral and one enlarged title are readable
+     from a seat 50–60 cm away; everything else is "recognisable at a glance".
+     The 960×540 scale is preserved in design/variations-960x540.html.
+     Seven steps, all used, 12px hard floor —— 轮播版已由 §14 覆盖到 14px，见下方
+     §14；这一段保留的是 3.5 寸单屏版（design/variations-35-single.html）的记录。
+     ====================================================================== */
+  /* R4-09 — 给之后复用这份 token 的 Electron 渲染层：在 0.16 mm/px 的这块屏上，
+     12 / 13 / 14 三档的 modular step 是 1.08×，物理差 0.16 mm ≈ 1 弧分，低于分辨阈，
+     **它们是同一个视觉档**。三者的层级区分完全由 --ink / --body / --mute 与位置承担，
+     调 1px 字号调不出层级。真正起作用的只有三档：12–14 元数据 / 16–18 标题 /
+     44–48 主数字。轮播版按 brief-m0-rotation.md 的新表把下限整体抬到 14px。 */
+  --fs-micro:   12px;  /* floor — clock, status label, reason line, verdict  */
+  --fs-label:   13px;  /* agent name, empty / error headline                 */
+  --fs-unit:    14px;  /* percent sign suffix, second event row              */
+  --fs-num-sm:  16px;  /* V3's demoted percentage                            */
+  --fs-lead:    18px;  /* latest event title (brief floor is 16px)           */
+  --fs-num-v2:  44px;  /* V2 primary numeral, beside the 56px arc           */
+  --fs-num:     48px;  /* V1 primary numeral                                 */
+
+  --lh-tight:  1.08;   /* numerals                                           */
+  --lh-snug:   1.3;    /* headings, single-line rows                         */
+  --lh-normal: 1.5;    /* running text                                       */
+
+  --w-read:    400;
+  --w-emph:    500;
+  --w-announce:600;
+
+  /* letter-spacing — the ALL-CAPS floor of 0.06em is a hard gate            */
+  --tr-caps:   .08em;
+  --tr-small:  .01em;  /* 12–13px                                            */
+  --tr-body:   0;
+  --tr-num:    -.02em; /* 48px numerals need negative tracking               */
+
+  /* ==========================================================================
+     11 · PROJECT · MOTION (added — DESIGN.md documents no motion at all)
+     Motion is reserved for state change. Everything below is stripped under
+     prefers-reduced-motion; only the instant switch survives.
+     ====================================================================== */
+  --dur-instant:  120ms;  /* hover / press                                   */
+  --dur-state:    180ms;  /* state confirmation — the 150ms convergence      */
+  --dur-bar:      300ms;  /* quota bar / arc advance                         */
+  --dur-event:    360ms;  /* new event push-in (brief ceiling 400ms)         */
+  --ease-standard: cubic-bezier(.2, 0, 0, 1);   /* M3 standard, front-loaded */
+  --ease-exit:     cubic-bezier(.4, 0, 1, 1);
+  --cycle-pulse:   2s;    /* running — agent badge                           */
+  --cycle-breathe: 3s;    /* attention — brightness delta ≤8%                */
+
+  /* ==========================================================================
+     14 · PROJECT · ROTATION LAYER (brief-m0-rotation.md)
+     一屏只回答一个问题，字号就能整体抬一档。这一层覆盖 §10 的下限：
+     任何文本 ≥14px（12 / 13px 全部废除，依据 04-verify-hierarchy-35.md 的物理
+     可读性推算：0.16 mm/px @ 55 cm 下 12px CJK 落在「认不出」区）。
+     §10 那张表保留作 3.5 寸单屏版的记录，见 design/variations-35-single.html。
+     ====================================================================== */
+  --fs-min:      14px;  /* 硬下限 — 时钟、事件时间、B 页判语、原因句        */
+  --fs-body-r:   16px;  /* A 页 agent 名、C 页次级标题、空/错原因句         */
+  --fs-cd-a:     18px;  /* A 页倒计时 — 12px 分不清 2h22m 与 2h26m          */
+  --fs-num-b:    20px;  /* B 页 5h 百分比                                   */
+  --fs-lead-r:   20px;  /* C 页最新事件标题                                 */
+  --fs-unit-r:   20px;  /* A 页百分号后缀                                   */
+  --fs-attn-lead:28px;  /* attention 页「等待你」（简报底线 24）            */
+  --fs-attn-body:18px;  /* attention 页说明句                               */
+  --fs-num-a:    64px;  /* A 页 5h 百分比（简报底线 64）                     */
+
+  /* 节奏 —— REVISION 5（用户 2026-09-14 实机反馈：原 10/6/6 s 太快）。
+     三页一律 60 s，一轮 3 分钟。原来的设计假设是「靠快速回归 A 页来补偿
+     『想看的不在屏上』」，实机否掉了这个假设：在副屏上人是余光扫，不是盯着等，
+     页太快反而每一眼都撞在切换动画上。改成慢轮播之后，回归靠的不再是频率而是
+     **打断**——新事件与 attention 会主动把该看的推到眼前，定时轮播只负责兜底。
+     「空闲加速」也随之作废：既然不靠频率回归，空闲时缩短停留就没有意义了。 */
+  --dwell-a:      60s;
+  --dwell-b:      60s;
+  --dwell-c:      60s;
+  --dwell-event:  60s;  /* 新事件跳 C 后停满一个 dwell，再来一条重新计时     */
+  --dur-page:    300ms; /* 横向滑动切页                                     */
+
+  /* ==========================================================================
+     12 · PROJECT · GEOMETRY — 480×270 canvas, rendered at zoom 2
+     REVISION 3. The canvas is authored at 480×270 and the whole stage carries
+     zoom: 2, so it fills the panel's 960×540 logical resolution 1:1 and no
+     layout is "shrunk to fit". Screenshots still come out 960×540 @2x.
+     ====================================================================== */
+  --screen-w:   480px;
+  --screen-h:   270px;
+  --screen-zoom: 2;
+  --pad-screen: 8px;
+  --gap-tile:   8px;
+  --gap-block:  8px;
+  --h-topbar:   16px;   /* clock only — the wordmark is cut on this canvas   */
+  --h-tile:     137px;  /* V1 / V2 quota tile                                */
+  --h-band:     48px;   /* V3 stacked time band                              */
+  --h-row-lead: 44px;   /* enlarged latest event (V3 uses 64px, two lines)   */
+  --h-row:      32px;   /* second event row — brief floor is 28px            */
+  --gauge:      60px;   /* V2 arc, brief range 56–64px                       */
+  /* R3-02 / R4-04: the progress arc is 4px wider than the track — 2px per side
+     = 0.32 mm ≈ 2 arc-minutes at 55 cm, above the ~1 arc-minute resolution
+     limit. The previous 1px total (0.5px/side ≈ 0.5 arc-minutes) was below it,
+     so the identity-coloured arc had no usable separation from the track
+     (Claude 1.71:1, ZCode 1.78:1 by luminance alone). */
+  --arc-stroke: 8px;    /* progress arc                                      */
+  --arc-track:  4px;    /* gauge track                                       */
+  --arc-sweep:  270;    /* degrees, opening faces down                       */
+  --dot:        6px;    /* unread / attention mark — R4-16: back to 6px       */
+}
+
+/* ============================================================================
+   FINDINGS — design-system-extract Phase 4
+   ============================================================================
+
+   SOURCES USED
+   · DESIGN.md (raycast, 2026-09-14 copy) — front-matter token block plus the
+     Colors / Typography / Layout / Elevation & Depth / Shapes / Components /
+     Do's and Don'ts prose sections.
+   · PLAN.md §3.2 / §3.5 for the project-layer decisions.
+   · design/fixtures/quota.json + events.json for the values the scale must
+     actually hold (48px "97%" and a 64-character CJK title were the two
+     sizing constraints that mattered).
+
+   EXTRACTED VERBATIM
+   Surface ladder (4 steps) · 3 hairlines · 8 text colors · 4 semantic colors
+   + their soft variants · radius scale · spacing scale · Inter with the full
+   font-feature-settings string. No value in §1–§6 and §9's Inter stack was
+   invented; every hex traces to a line in DESIGN.md.
+
+   GAPS IN DESIGN.md — filled here, flagged for review
+   1. No multi-brand / categorical color slot. raycast has exactly one brand
+      action (white) and treats saturated color as illustration-only. A
+      three-agent monitor needs three peer identities, so §7 is net-new. It is
+      scoped to marks, never to fills, so the "no saturated color on chrome"
+      rule survives in spirit.
+   2. No motion tokens at all — §11 is net-new.
+   3. No monospace face. DESIGN.md names JetBrains Mono / Geist Mono only as
+      substitutes for inline code chips. §9 promotes IBM Plex Mono to the
+      numeric tier; rationale in design/review/00-designer-notes.md.
+   4. No dashboard type scale. The extracted scale tops out at 64px display
+      and bottoms at 12px caption — both tuned for a marketing page at desk
+      distance. §10 re-cuts it for a 7" panel at arm's length.
+   5. No disabled / loading / empty / error component states, and no hover
+      states by stated system policy ("No hover states documented"). All five
+      states are project-defined in variations.html.
+   6. No focus token. DESIGN.md's only focus treatment is text-input-focused,
+      which brightens the border to --hairline-strong. Measured, that is
+      1.56:1 against --surface — it fails WCAG 1.4.11's 3:1 floor for a focus
+      indicator. This project uses a 2px --ink ring instead (17.05:1 on
+      --surface-card). This is a correction, not a preference.
+
+   INCONSISTENCIES WORTH KNOWING
+   · Three near-identical light neutrals — ink #f4f4f6, charcoal #d3d3d4,
+     body #cdcdcd — separated by under 1 point of contrast. Kept as extracted.
+     charcoal is NOT dead weight any more: REVISION 1 gave it the Codex identity
+     and REVISION 4 gave it every quota fill — sitting half a step below ink is
+     exactly what keeps both of them out of the accent budget.
+   · --ash #6a6b6c is documented for "disabled-state text" yet measures
+     3.64:1 on --surface. That clears 3:1 for non-text and large text but
+     fails the 4.5:1 body floor. The brief permits it at ≥18px; this project
+     is stricter and uses it for non-informational marks only (axis ticks,
+     inactive glyphs), with --mute (7.09:1) carrying every piece of small
+     metadata that means something.
+   · DESIGN.md's own "Don't" list forbids saturated accents on chrome or
+     text, while its Semantic section defines them as error/success/warning
+     colors. The contradiction is resolved here by §4's scope note: semantic
+     color appears only on quota thresholds, where it is the information.
+   · --hero-stripe gradient and --key-bg gradient were deliberately NOT
+     extracted. The brief bans gradients outright and this surface has no
+     hero.
+
+   RECOMMENDED NEXT STEPS
+   Review §7 (identity trio) and §10 (type scale) — they are the two layers
+   that are project judgement rather than extraction. Then reuse this file
+   unchanged in the Electron renderer; nothing here depends on the prototype.
+   ========================================================================= */
