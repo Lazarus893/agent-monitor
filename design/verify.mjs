@@ -5,13 +5,21 @@ const FILE  = 'file:///Users/tonyye/Projects/Monitor/design/variations.html';
 const SHOTS = '/Users/tonyye/Projects/Monitor/design/shots';
 fs.mkdirSync(SHOTS, { recursive: true });
 
-const PAGES  = ['a', 'b', 'c', 'attn'];
+const PAGES  = ['a', 'b', 'c1', 'c2', 'd', 'e', 'attn'];
+// v2 · 两个画布高度 × 两个横向补偿系数。1.19 是用户用 aspect-test.html 的圆校准出来的，
+// 画布逻辑宽收窄到 round(480/1.19)=403，六页在 403 宽下同样不能溢出。
+const CANVASES = [
+  { px: 1.00, h: 270, label: '480x270' },
+  { px: 1.00, h: 320, label: '480x320' },
+  { px: 1.19, h: 270, label: '403x270' },
+  { px: 1.19, h: 320, label: '403x320' },
+];
 const STATES = ['populated', 'loading', 'empty', 'error', 'edge', 'attention', 'running'];
 const FONT_FLOOR = 14;                       // R4-06 · 轮播版把下限从 12 抬到 14
 // R5-05 · 间距栅格与「允许的例外」。这份清单必须与 tokens.css §6 逐字对应；
 // 断言不再靠手写核对，而是运行时扫描全部 gap/padding/margin 后与它比集合。
 const SCALE = [0, 2, 4, 8, 12, 16, 24, 32];
-const SPACING_EXCEPTIONS = [];               // 目标：空集
+const SPACING_EXCEPTIONS = ['6px paddingBottom on .'];   // 与 tokens.css §6 逐条对应
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1100, height: 900 }, deviceScaleFactor: 2 });
@@ -26,13 +34,21 @@ await page.waitForTimeout(900);
 await page.uncheck('#chkRotate');            // 逐格检查时关掉轮播，避免页自己跑掉
 
 const problems = [];
+let okCount = 0;
 let trackReportOnce = null;
 
-for (const p of PAGES) {
+for (const cv of CANVASES) {
+ await page.evaluate(({ px, h }) => {
+   const r = document.getElementById('rngPanel');
+   r.value = String(px); r.dispatchEvent(new Event('input', { bubbles: true }));
+   document.querySelector(`#segH button[data-h="${h}"]`).click();
+ }, cv);
+ await page.waitForTimeout(260);
+ for (const p of PAGES) {
   for (const s of STATES) {
     await page.click(`#segState button[data-s="${s}"]`);
     await page.click(`#segPage button[data-p="${p}"]`);
-    await page.waitForTimeout(220);
+    await page.waitForTimeout(200);
 
     const r = await page.evaluate(({ FONT_FLOOR, SCALE_IN }) => {
       const stage = document.getElementById('stage');
@@ -52,12 +68,25 @@ for (const p of PAGES) {
 
       // 1 · 画布边界。待命页停在画布左外侧是刻意的，不查；4 页 × 7 态的循环
       //     保证每一页都会在「它是当前页」那一格被完整检查。
+      // 「越出画布」只对没有裁切祖先的元素成立。省略号截断的内联 span 的 rect
+      // 本来就会超出父盒，但它被 overflow:hidden 的祖先夹住，屏上不会露出去——
+      // 把它报成越界是口径错，不是缺陷（同一类问题这已经是第三次了）。
+      const clipped = n => {
+        for (let a = n.parentElement; a && a !== stage.parentElement; a = a.parentElement) {
+          const o = getComputedStyle(a);
+          if (o.overflowX !== 'visible' || o.overflowY !== 'visible') return true;
+        }
+        return false;
+      };
       for (const n of stage.querySelectorAll('*')) {
         if (n.closest('.sr') || n.closest('.page[data-on="0"]')) continue;
         const b = n.getBoundingClientRect();
         if (b.width === 0 && b.height === 0) continue;
-        if (b.left < sb.left - 1 || b.right > sb.right + 1 || b.top < sb.top - 1 || b.bottom > sb.bottom + 1)
-          out.push(`OUTSIDE ${n.className || n.tagName}`);
+        if (b.left < sb.left - 1 || b.right > sb.right + 1 || b.top < sb.top - 1 || b.bottom > sb.bottom + 1) {
+          if (clipped(n)) continue;
+          out.push(`OUTSIDE ${(typeof n.className === 'string' && n.className) || n.tagName}` +
+                   ` < ${(n.parentElement && n.parentElement.className) || '?'}`);
+        }
       }
       // 2 · 裁切 / 溢出
       for (const n of stage.querySelectorAll('.screen,.pages,.page,.tiles,.bands,.feed,.tile,.tile-head,.tile-foot,.row,.b-head,.band,.msg,.attn-card')) {
@@ -137,6 +166,16 @@ for (const p of PAGES) {
           .length && !pg.inert ? pg.querySelectorAll('button,a[href],input,select,textarea,[tabindex]:not([tabindex="-1"])').length : 0;
       }
 
+      // 4d · E 页每条新闻的相对时间必须真的渲染且有宽度。
+      //      这条是补的：时间原本被来源的省略号整个吃掉，而没有任何断言看着它。
+      let newsNoTime = 0;
+      if (live && live.dataset.p === 'e') {
+        for (const it of live.querySelectorAll('.e-item')) {
+          const tEl = it.querySelector('.e-time');
+          if (!tEl || !tEl.textContent.trim() || tEl.getBoundingClientRect().width < 1) newsNoTime++;
+        }
+      }
+
       // 5 · accent：按计算颜色全量扫描，只数当前可见页
       const ACCENT = 'rgb(244, 244, 246)';
       const accentEls = [];
@@ -152,12 +191,12 @@ for (const p of PAGES) {
           accentEls.push(typeof n.className === 'string' && n.className ? n.className : n.tagName);
       }
       return {
-        problems: out, accentEls, accent: accentEls.length, minFont,
+        problems: out, accentEls, accent: accentEls.length, minFont, newsNoTime,
         offScale: [...new Set(offScale)], focusableHidden,
         headings: stage.querySelectorAll('h1,h2,h3,[role=heading]').length,
         statusEls: stage.querySelectorAll('[role="status"]').length,
         clocks: [...stage.querySelectorAll('[data-clock]')].filter(n => n.getBoundingClientRect().height > 0 && n.textContent.trim()).length,
-        dots: [...document.querySelectorAll('#dots i')].map(n => n.dataset.on).join(''),
+        dots: [...document.querySelectorAll('#dots button')].map(n => n.dataset.on).join(''),
         trackReport,
       };
     }, { FONT_FLOOR, SCALE_IN: SCALE });
@@ -166,29 +205,46 @@ for (const p of PAGES) {
     if (r.headings < 5) r.problems.push(`HEADINGS ${r.headings} < 5`);
     if (s === 'loading' && r.statusEls < 1) r.problems.push('LOADING no role=status');
     if (r.clocks < 1) r.problems.push('CLOCK missing');
+    if (r.newsNoTime > 0) r.problems.push(`E 页有 ${r.newsNoTime} 条新闻没渲染出时间`);
     // R5-01 · inert 断言
     if (r.focusableHidden > 0) r.problems.push(`INERT 非当前页仍有 ${r.focusableHidden} 个可聚焦元素`);
     // R5-05 · 例外清单断言：实测的 off-scale 集合必须等于声明的例外集合
     const unexpected = r.offScale.filter(x => !SPACING_EXCEPTIONS.includes(x));
     if (unexpected.length) r.problems.push(`OFF-SCALE 未登记: ${unexpected.join(' | ')}`);
-    if (r.problems.length) problems.push({ p, s, list: r.problems });
+    if (r.problems.length) problems.push({ cv: cv.label, p, s, list: r.problems });
     if (!trackReportOnce && r.trackReport.length) trackReportOnce = r.trackReport;
-    console.log(`${p.padEnd(4)}/${s.padEnd(9)} accent=${r.accent} minFont=${r.minFont} off=${r.offScale.length} inert=${r.focusableHidden === 0 ? 'ok' : 'FAIL'} h=${r.headings} status=${r.statusEls} clock=${r.clocks} dots=${r.dots} ${r.problems.length ? 'FAIL ' + r.problems.slice(0, 2).join(' | ') : 'ok'}`);
+    if (r.problems.length)
+      console.log(`${cv.label} ${p.padEnd(4)}/${s.padEnd(9)} FAIL ${r.problems.slice(0, 2).join(' | ')}`);
+    else okCount++;
   }
+ }
 }
+console.log(`\n格子检查：${okCount} / ${CANVASES.length * PAGES.length * STATES.length} 通过` +
+            `（${CANVASES.length} 画布 × ${PAGES.length} 页 × ${STATES.length} 态）`);
 
 console.log('\n轨道 / 填充 / 缺口对比度:');
 for (const [n, v] of trackReportOnce || []) console.log(`  ${n.padEnd(22)} ${v}:1 ${v >= 3 ? 'PASS' : (n.startsWith('fill-vs-track') ? '(参考，边界由缺口承担)' : 'FAIL')}`);
 
-// ---------------- 截图 ----------------
-await page.click('#segState button[data-s="populated"]');
-for (const [p, name] of [['a', 'page-a'], ['b', 'page-b'], ['c', 'page-c']]) {
-  await page.click(`#segPage button[data-p="${p}"]`); await page.waitForTimeout(400);
-  await page.locator('#stage').screenshot({ path: `${SHOTS}/${name}.png` });
+// ---------------- 截图：panelX 1.0 作对照 + 1.19 实机系数（-x119） ----------------
+const SHOT_PAGES = [['a','page-a'],['b','page-b'],['c1','page-c'],['c2','page-c2'],['d','page-d'],['e','page-e']];
+for (const px of [1.00, 1.19]) {
+  const sfx = px === 1.19 ? '-x119' : '';
+  await page.evaluate(v => { const r = document.getElementById('rngPanel');
+    r.value = String(v); r.dispatchEvent(new Event('input', { bubbles: true }));
+    document.querySelector('#segH button[data-h="270"]').click(); }, px);
+  await page.click('#segState button[data-s="populated"]');
+  await page.waitForTimeout(320);
+  for (const [p, name] of SHOT_PAGES) {
+    await page.click(`#segPage button[data-p="${p}"]`); await page.waitForTimeout(380);
+    await page.locator('#stage').screenshot({ path: `${SHOTS}/${name}${sfx}.png` });
+  }
+  await page.click('#segState button[data-s="attention"]');
+  await page.click('#segPage button[data-p="attn"]'); await page.waitForTimeout(380);
+  await page.locator('#stage').screenshot({ path: `${SHOTS}/page-attention${sfx}.png` });
 }
-await page.click('#segState button[data-s="attention"]');
-await page.click('#segPage button[data-p="attn"]'); await page.waitForTimeout(400);
-await page.locator('#stage').screenshot({ path: `${SHOTS}/page-attention.png` });
+await page.evaluate(() => { const r = document.getElementById('rngPanel');
+  r.value = '1.19'; r.dispatchEvent(new Event('input', { bubbles: true })); });
+await page.click('#segState button[data-s="populated"]');
 
 // ---------------- 节奏断言 ----------------
 console.log('\n节奏:');
@@ -227,7 +283,7 @@ await page.click('#segPage button[data-p="a"]');
 await page.waitForTimeout(100);
 await page.click('#btnPush');
 await page.waitForTimeout(180);
-const onC = await page.evaluate(() => !!document.querySelector('.page[data-p="c"][data-on="1"]'));
+const onC = await page.evaluate(() => !!document.querySelector('.page[data-p="c1"][data-on="1"]'));
 console.log('  新事件后 180ms 在 C 页:', onC);
 if (!onC) rhythm.push('新事件后 200ms 内没有切到 C 页');
 
@@ -285,16 +341,19 @@ if (await page.evaluate(() => document.documentElement.dataset.page) !== 'a') ma
 
 // 指示点：热区 24×24，视觉仍 4px
 const dot = await page.evaluate(() => {
-  const b = document.querySelector('#dots button[data-p="c"]');
-  const r = b.getBoundingClientRect(), z = Number(getComputedStyle(document.documentElement).getPropertyValue('--screen-zoom')) || 1;
-  return { w: Math.round(r.width / z), h: Math.round(r.height / z),
+  const b = document.querySelector('#dots button[data-p="d"]');
+  // stage 现在用 transform: scale(2*panelX, 2)，横纵倍率不同，换算要分开算
+  const cs = getComputedStyle(document.documentElement);
+  const px = Number(cs.getPropertyValue('--panel-x')) || 1;
+  const r = b.getBoundingClientRect(), zx = 2 * px, zy = 2;
+  return { w: Math.round(r.width / zx), h: Math.round(r.height / zy),
            visual: getComputedStyle(b, '::after').width };
 });
 console.log('  指示点:', JSON.stringify(dot));
 if (dot.w < 24 || dot.h < 24) manual.push(`指示点热区不足 24×24（实测 ${dot.w}×${dot.h}）`);
 if (dot.visual !== '4px') manual.push(`指示点视觉不是 4px（实测 ${dot.visual}）`);
-await page.click('#dots button[data-p="c"]'); await page.waitForTimeout(150);
-if (await page.evaluate(() => document.documentElement.dataset.page) !== 'c') manual.push('点击指示点没有跳页');
+await page.click('#dots button[data-p="d"]'); await page.waitForTimeout(150);
+if (await page.evaluate(() => document.documentElement.dataset.page) !== 'd') manual.push('点击指示点没有跳页');
 
 // 边缘热区 15% + hover chevron
 const edge = await page.evaluate(() => {
@@ -327,7 +386,7 @@ if (stayed !== 'b') manual.push(`手动暂停期间仍自动翻页（跑到了 $
 await page.click('#btnPush'); await page.waitForTimeout(200);
 const toC = await page.evaluate(() => document.documentElement.dataset.page);
 console.log('  手动暂停期间来新事件:', toC);
-if (toC !== 'c') manual.push('手动暂停期间新事件没有跳 C');
+if (toC !== 'c1') manual.push('手动暂停期间新事件没有跳 C1');
 // attention 下 ←/→ 无效
 await page.click('#btnAttn'); await page.waitForTimeout(250);
 await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowLeft');
@@ -336,7 +395,7 @@ const attnPage = await page.evaluate(() => document.documentElement.dataset.page
 console.log('  attention 下按 ←/→:', attnPage);
 if (attnPage !== 'attn') manual.push('attention 页被 ←/→ 切走了');
 // 但 Enter 仍可 ack
-await page.click('#segPage button[data-p="c"]'); await page.waitForTimeout(250);
+await page.click('#segPage button[data-p="c1"]'); await page.waitForTimeout(250);
 // 调试视图里控制栏还在，单按一次 Tab 只会落到隔壁的控制栏按钮上（上一版就是这么
 // 误报的）。一路 Tab 到焦点真的进了画布再按 Enter。
 for (let i = 0; i < 30 && !await page.evaluate(() => !!document.activeElement.closest('#stage')); i++)

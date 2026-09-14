@@ -200,6 +200,10 @@ accent
      手写清单，而是把它做成断言：design/verify.mjs 每格都会扫描 stage 内全部计算出的
      gap / rowGap / columnGap / padding* / margin*，凡不落在上面这条标度上的一律报错。
      **当前实测集合为空**——轮播版里没有任何 off-scale 的间距。
+     当前唯一登记的例外：
+       · .dots button { padding-bottom: 6px }  —— v2 第 6 条明写「指示点离画布底约 6px」，
+         而热区要保持 24×24，只能靠按钮内的下内边距把 4px 的点压到底部。
+
      两条随之而来的纪律：
        · 不用 margin:auto 做分布。getComputedStyle 会把它解析成一个巨大的 used value
          （实测 371.58px），在这条断言里读起来像野值；改用显式的 grid-column。
@@ -360,6 +364,29 @@ accent
      又短到不需要用户记得去恢复它。期间指示点左侧挂一个「‖」，
      让「现在是我按停的」这件事一直可见，而不是让人以为轮播坏了。 */
   --manual-hold: 120s;
+
+  /* 横向压缩补偿（v2 第 5 条）。副屏在 960×540 模式下被面板缩放器横向压了 15.6%，
+     用户用 design/aspect-test.html 的圆校准出系数 1.19。画布逻辑宽收窄到
+     round(480 / 1.19) = 403px，再由 stage 的非等比 transform 拉回 960 物理宽。
+     960×640 原生模式下不需要补偿，置 1.0。
+
+     横向倍率是 2 × panelX，不是 目标宽 / 画布宽。两者差 0.09%，stage 因此实际宽
+     959.14px 而不是 960。这 0.86px 是**有意留下的**：panelX 不是一个可以四舍五入的
+     版面系数，而是用户拿校准页的圆量出来的**面板物理压缩比**——960×540 模式下面板
+     自己的缩放器把 16:9 的内容塞进 3:2 的屏，这个比例是硬件属性，从窗口宽度反推不
+     出来（960×640 模式下它是 1.0）。用 960/403 去凑整会把这次测量悄悄抹掉。
+     右缘那 1px 的缝归窗口层解决（把窗口宽设成画布宽 × 倍率，或让主进程按目标模式
+     下发系数），不归这里。 */
+  --panel-x: 1.19;
+
+  /* D 页热力图五档。0 档用 surface 阶梯，1–4 档是中性明度阶——不用 GitHub 的绿，
+     也不用 --accent-blue（会和 ZCode 的身份色 #6f93e6 混淆）。顶档就是 --charcoal，
+     与 --quota-fill 同色：在这套系统里它一贯的含义是「这是数据，不是强调」。 */
+  --heat-0: var(--surface-elevated);
+  --heat-1: #2b2c2e;
+  --heat-2: #4d4f52;
+  --heat-3: #8a8c91;
+  --heat-4: var(--charcoal);
   --dur-page:    300ms; /* 横向滑动切页                                     */
 
   /* ==========================================================================
@@ -489,7 +516,7 @@ body{margin:0;background:#303236;color:#c9ccd1;
   background:#25272a;border:1px solid #3c3f44;border-radius:6px;padding:7px 10px;min-width:190px}
 .legend{width:960px;color:#9aa0a8;font-size:12px;line-height:1.65;margin:0}
 .legend b{color:#e6e8ea;font-weight:600}
-.stage-wrap{width:960px;height:540px;position:relative}
+.stage-wrap{width:960px;height:calc(var(--screen-h) * 2);position:relative}
 
 /* ==========================================================================
    纯净模式 —— 副屏上还原最终效果：只剩画布
@@ -497,6 +524,11 @@ body{margin:0;background:#303236;color:#c9ccd1;
    body 背景直接就是 --canvas，画布居中铺满视口。
    ========================================================================== */
 .pure-hint{margin:0;font-size:14px;color:#9aa0a8;letter-spacing:.02em}
+/* 纯净模式下按 [ / ] 调补偿系数时，右上角闪显 1s —— 这是校准用的读数，不进画布设计 */
+.panel-flash{position:fixed;top:16px;right:20px;z-index:5;
+  font:14px/1 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink);
+  background:var(--surface-card);border:1px solid var(--ash);border-radius:6px;padding:8px 10px}
+.panel-flash[hidden]{display:none}
 .pure-hint[hidden]{display:none}
 html[data-pure="1"] body{background:var(--canvas);gap:0;padding:0;justify-content:center}
 html[data-pure="1"] .harness,
@@ -504,8 +536,13 @@ html[data-pure="1"] .legend{display:none}
 html[data-pure="1"] .stage{box-shadow:none;border-radius:0}
 html[data-pure="1"] .pure-hint{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);
   color:var(--mute);font-family:var(--font-sans);z-index:2}
-.stage{width:var(--screen-w);height:var(--screen-h);zoom:var(--screen-zoom);
-  background:var(--canvas);position:relative;overflow:hidden;border-radius:1px;
+/* 副屏在 960×540 模式下被面板缩放器横向压了 15.6%（EDID 原生 960×640）。
+   补偿办法：画布逻辑宽收窄到 round(480 / panelX)，再用非等比 transform 把它拉回
+   960 物理宽——横向 2×panelX、纵向 2×。zoom 做不到非等比，所以这里从 zoom 换成
+   transform，同时 transform 不参与父级布局，.stage-wrap 要显式给出占位尺寸。 */
+.stage{width:var(--screen-w);height:var(--screen-h);
+  transform:scale(calc(2 * var(--panel-x)), 2);transform-origin:top left;
+  background:var(--canvas);position:relative;overflow:hidden;
   box-shadow:0 0 0 .5px #3c3f44;
   font-family:var(--font-sans);font-feature-settings:var(--font-features);
   color:var(--body);-webkit-font-smoothing:antialiased}
@@ -538,16 +575,20 @@ html[data-pure="1"] .pure-hint{position:fixed;left:50%;bottom:24px;transform:tra
 
 /* ---- 页容器：横向滑动切页 ---- */
 .pages{flex:1;min-height:0;margin-top:var(--gap-block);position:relative;overflow:hidden}
-.page{position:absolute;inset:0;padding-bottom:12px;display:flex;flex-direction:column;
+/* 底部 24px 是指示点的地盘，再留 8px 让 C 页最后一行不贴上去（v2 第 6 条） */
+.page{position:absolute;inset:0;padding-bottom:32px;display:flex;flex-direction:column;
   opacity:0;pointer-events:none;transform:translateX(-24px);
   transition:opacity var(--dur-page) var(--ease-standard),transform var(--dur-page) var(--ease-standard)}
 .page[data-on="1"]{opacity:1;pointer-events:auto;transform:none}
 
-/* ---- 页指示：右下角三点。简报明确写了这不算 accent ---- */
-.dots{position:absolute;right:0;bottom:0;display:flex;align-items:center;z-index:3}
-/* 视觉仍是 4px 点，热区放大到 24×24：点本身用伪元素画，button 只负责命中 */
-.dots button{appearance:none;border:0;background:transparent;padding:0;cursor:pointer;
-  width:24px;height:24px;display:grid;place-items:center}
+/* ---- 页指示：水平居中、贴画布底边（v2 第 6 条：原来贴右下角，与瓦片边框重合）。
+   简报明确写了这不算 accent ---- */
+.dots{position:absolute;left:50%;transform:translateX(-50%);bottom:0;height:24px;
+  display:flex;align-items:center;z-index:3}
+/* 视觉仍是 4px 点、热区仍是 24×24：点靠 place-items:end 压到按钮底部，
+   于是「点离画布底 6px」与「热区 24×24 不被裁切」两条可以同时成立 */
+.dots button{appearance:none;border:0;background:transparent;padding:0 0 6px;cursor:pointer;
+  width:24px;height:24px;display:grid;place-items:end center}
 .dots button::after{content:"";width:4px;height:4px;border-radius:var(--r-full);background:var(--ash);
   transition:background var(--dur-state) var(--ease-standard)}
 .dots button[data-on="1"]::after{background:var(--ink)}
@@ -660,7 +701,6 @@ html[data-pure="1"] .pure-hint{position:fixed;left:50%;bottom:24px;transform:tra
 .page-b .b-name span.t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .page-b .b-verdict{font-size:var(--fs-min);color:var(--mute);flex:1;min-width:0;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.2}
-.page-b .b-verdict[data-tone="over"]{color:var(--quota-warn)}
 .page-b .b-verdict[data-tone="error"]{color:var(--danger)}
 .page-b .b-verdict[data-tone="attn"]{color:var(--ink);font-weight:var(--w-read)}
 .page-b .b-pc{font-size:var(--fs-num-b);font-weight:var(--w-emph);color:var(--ink);flex:none}
@@ -697,10 +737,10 @@ html[data-pure="1"] .pure-hint{position:fixed;left:50%;bottom:24px;transform:tra
   background:transparent;border:1px solid transparent;border-radius:var(--r-sm);
   color:inherit;font:inherit;cursor:pointer;flex:none;position:relative;
   display:grid;align-items:center;column-gap:var(--sp-sm);padding:0 var(--sp-sm);
-  grid-template-columns:64px minmax(0,1fr) 68px 14px var(--dot);height:46px;
+  grid-template-columns:64px minmax(0,1fr) 88px 14px var(--dot);height:44px;
   transition:background var(--dur-state) var(--ease-standard),border-color var(--dur-state) var(--ease-standard)}
 
-.row.lead{height:56px}
+.row.lead{height:52px}
 .row.lead .rtitle{font-size:var(--fs-lead-r);font-weight:var(--w-emph);color:var(--ink);line-height:1.15}
 .chip{font-size:var(--fs-min);font-weight:var(--w-emph);letter-spacing:var(--tr-caps);
   text-transform:uppercase;color:var(--idc);white-space:nowrap;line-height:1.2}
@@ -708,9 +748,11 @@ html[data-pure="1"] .pure-hint{position:fixed;left:50%;bottom:24px;transform:tra
   font-weight:var(--w-emph);letter-spacing:var(--tr-small);color:var(--ink);white-space:nowrap;line-height:1}
 .rtitle{font-size:var(--fs-body-r);line-height:1.2;color:var(--body);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+/* 88px 是「9/13 10:36」在 14px IBM Plex Mono 下的实际宽度（10 字符 × 8.4 ≈ 84）。
+   加 overflow:hidden 兜底：真实数据里出现更长的时间串时截断，而不是压到图标上。 */
 .rtime{font-family:var(--font-num);font-feature-settings:var(--num-features);
   font-variant-numeric:tabular-nums;font-size:var(--fs-min);color:var(--mute);
-  white-space:nowrap;text-align:right;line-height:1}
+  white-space:nowrap;text-align:right;line-height:1;min-width:0;overflow:hidden}
 .rkind{display:inline-flex;align-items:center;justify-content:center;color:var(--mute)}
 .rkind[data-kind="failed"]{color:var(--danger)}
 .rkind[data-kind="running"]{color:var(--idc);animation:pulse var(--cycle-pulse) var(--ease-standard) infinite}
@@ -736,8 +778,74 @@ html[data-pure="1"] .pure-hint{position:fixed;left:50%;bottom:24px;transform:tra
 @keyframes enter{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
 .feed-msg{flex:1;display:flex;flex-direction:column;justify-content:center;gap:var(--sp-xs);padding:0 var(--sp-sm)}
 .feed-skel{flex:1;display:flex;flex-direction:column;gap:var(--sp-xs)}
-.feed-skel i{display:block;height:46px;background:var(--stone);border-radius:var(--r-sm);flex:none}
-.feed-skel i:first-child{height:56px}
+.feed-skel i{display:block;height:44px;background:var(--stone);border-radius:var(--r-sm);flex:none}
+.feed-skel i:first-child{height:52px}
+
+/* ==========================================================================
+   D 页 · 每日用量热力图
+   配色决定：不用 GitHub 的绿，也不用 --accent-blue —— 蓝会和 ZCode 的身份色
+   #6f93e6 混淆。改用系统里已经在承担「数据」职责的那条中性阶：0 档是
+   --surface-elevated，1–4 档沿 --charcoal 方向的中性明度阶。同一色相（中性）、
+   无渐变，且顶档就是 --charcoal，与额度填充 --quota-fill 同色，含义一致：
+   「这是数据，不是强调」。格子不按 agent 分色，只按总量分档。
+   ========================================================================== */
+.page-d .dwrap{flex:1;display:flex;flex-direction:column;gap:var(--sp-sm);min-height:0}
+.page-d .d-head{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-sm);flex:none;height:20px}
+.page-d .d-title{font-size:var(--fs-body-r);font-weight:var(--w-emph);color:var(--ink);
+  white-space:nowrap;line-height:1}
+.page-d .d-legend{display:flex;align-items:center;gap:var(--sp-md);
+  font-size:var(--fs-min);color:var(--mute);line-height:1}
+.page-d .d-legend span{display:inline-flex;align-items:center;gap:var(--sp-xs);white-space:nowrap}
+.page-d .d-legend i{width:var(--dot);height:var(--dot);border-radius:var(--r-full);background:var(--idc)}
+/* 数据只有 8 周时格子占不满 464px。左对齐会读成「右边那片是不是没加载出来」，
+   所以整块居中——列数少是数据的事实，不该让版面看起来像坏了。 */
+.page-d .d-grid{display:flex;gap:var(--sp-sm);flex:1;min-height:0;
+  align-items:center;justify-content:center}
+.page-d .d-days{display:grid;grid-auto-rows:var(--cell);row-gap:2px;flex:none;width:26px;
+  font-size:var(--fs-min);color:var(--mute)}
+.page-d .d-days span{line-height:var(--cell)}
+.page-d .d-cells{display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,var(--cell));gap:2px;flex:none}
+.page-d .cell{width:var(--cell);height:var(--cell);border-radius:2px;border:0;padding:0;
+  background:var(--heat-0);cursor:default}
+.page-d .cell[data-l="1"]{background:var(--heat-1)}
+.page-d .cell[data-l="2"]{background:var(--heat-2)}
+.page-d .cell[data-l="3"]{background:var(--heat-3)}
+.page-d .cell[data-l="4"]{background:var(--heat-4)}
+.page-d .cell[data-void="1"]{background:transparent}
+.page-d .cell:focus-visible{outline:none;box-shadow:0 0 0 2px var(--accent)}
+.page-d .d-tip{flex:none;height:20px;font-size:var(--fs-min);color:var(--body);line-height:20px;
+  display:flex;align-items:center;justify-content:flex-start;gap:var(--sp-sm);overflow:hidden;white-space:nowrap}
+.page-d .d-tip b{font-weight:var(--w-emph);color:var(--ink)}
+.page-d .d-tip .dim{color:var(--mute);overflow:hidden;text-overflow:ellipsis}
+.page-d .d-scale{display:flex;align-items:center;gap:var(--sp-xs);flex:none;margin-inline-start:var(--sp-sm)}
+.page-d .d-scale i{width:8px;height:8px;border-radius:2px;display:block}
+
+/* ==========================================================================
+   E 页 · 今日 AI 大事（AIHOT）—— 这一页是阅读不是扫视，五条等权
+   ========================================================================== */
+.page-e .ewrap{flex:1;display:flex;flex-direction:column;gap:var(--sp-sm);min-height:0}
+.page-e .e-head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--sp-sm);flex:none;height:20px}
+.page-e .e-title{font-size:var(--fs-body-r);font-weight:var(--w-emph);color:var(--ink);white-space:nowrap;line-height:1}
+.page-e .e-upd{font-family:var(--font-num);font-variant-numeric:tabular-nums;
+  font-size:var(--fs-min);color:var(--mute);white-space:nowrap;line-height:1}
+.page-e .e-list{flex:1;min-height:0;display:flex;flex-direction:column;gap:var(--sp-xs);overflow:hidden}
+/* 第三列写成 minmax(0,34%) 而不是 auto：auto 列按 max-content 定宽，
+   遇到超长来源名会把整个网格撑出画布（403 宽下必现，edge 态更明显）。 */
+.page-e .e-item{flex:1;min-height:0;display:grid;grid-template-columns:18px minmax(0,1fr) minmax(0,34%);
+  column-gap:var(--sp-sm);align-items:center}
+.page-e .e-no{font-family:var(--font-num);font-feature-settings:var(--num-features);
+  font-variant-numeric:tabular-nums;font-size:var(--fs-min);color:var(--mute);text-align:right;line-height:1}
+.page-e .e-t{font-size:var(--fs-body-r);line-height:1.2;color:var(--ink);text-wrap:balance;
+  display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden;-webkit-line-clamp:var(--e-lines)}
+/* 一个可裁切的格子里放「可变长的来源」+「必须出现的时间」，被裁掉的一定是后者——
+   实机上三条真实 AIHOT 来源名都够长，省略号全落在来源里，时间一条都没渲染出来。
+   改成 flex：时间 flex:none 永不收缩，来源才是被省略的那一半。
+   顺序仍按简报的「来源 · 时间」，时间因此天然右对齐成一列。 */
+.page-e .e-meta{font-size:var(--fs-min);color:var(--mute);line-height:1.2;min-width:0;
+  display:flex;align-items:baseline;justify-content:flex-end;gap:var(--sp-xs)}
+.page-e .e-src{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.page-e .e-time{flex:none;white-space:nowrap}
+.page-e .e-foot{flex:none;height:18px;font-size:var(--fs-min);color:var(--mute);line-height:18px}
 
 /* ==========================================================================
    attention 页 · 整屏只为这一件事
@@ -783,7 +891,10 @@ html[data-rm="1"] .page{transform:none!important}
     <div class="seg" id="segPage" role="group" aria-label="切换页">
       <button type="button" data-p="a" aria-pressed="true">A 总览</button>
       <button type="button" data-p="b" aria-pressed="false">B 额度</button>
-      <button type="button" data-p="c" aria-pressed="false">C 事件</button>
+      <button type="button" data-p="c1" aria-pressed="false">C1 session</button>
+      <button type="button" data-p="c2" aria-pressed="false">C2</button>
+      <button type="button" data-p="d" aria-pressed="false">D 用量</button>
+      <button type="button" data-p="e" aria-pressed="false">E 今日 AI</button>
       <button type="button" data-p="attn" aria-pressed="false">attention</button>
     </div>
   </div>
@@ -802,6 +913,16 @@ html[data-rm="1"] .page{transform:none!important}
       <button type="button" data-s="running"   aria-pressed="false">running</button>
     </div>
   </div>
+  <div class="hgroup"><b>画布</b>
+    <div class="seg" id="segH" role="group" aria-label="画布高度">
+      <button type="button" data-h="270" aria-pressed="true">480×270</button>
+      <button type="button" data-h="320" aria-pressed="false">480×320</button>
+    </div>
+    <label class="hcheck">panel-x
+      <input type="range" id="rngPanel" min="1" max="1.25" step="0.01" style="width:110px">
+      <span id="panelVal" style="font:12px/1 ui-monospace,monospace;min-width:34px">1.19</span>
+    </label>
+  </div>
   <div class="hgroup">
     <button type="button" class="hbtn" id="btnPure">纯净全屏</button>
     <button type="button" class="hbtn" id="btnPush">模拟新事件</button>
@@ -811,6 +932,7 @@ html[data-rm="1"] .page{transform:none!important}
 </div>
 
 <p class="pure-hint" id="pureHint" hidden>按任意键进入全屏</p>
+<div class="panel-flash" id="panelFlash" hidden></div>
 
 <div class="stage-wrap">
   <div class="stage" id="stage">
@@ -823,16 +945,14 @@ html[data-rm="1"] .page{transform:none!important}
       <div class="pages" id="pages">
         <section class="page page-a" data-p="a"><h2 class="sr">额度总览</h2><div class="tiles" id="paTiles"></div></section>
         <section class="page page-b" data-p="b"><h2 class="sr">额度详情</h2><div class="bands" id="pbBands"></div></section>
-        <section class="page page-c" data-p="c"><h2 class="sr" id="feedTitle">最近完成</h2><div class="feed" id="pcFeed"></div></section>
+        <section class="page page-c" data-p="c1"><h2 class="sr" id="feedTitle">最近的 session</h2><div class="feed" id="pc1Feed"></div></section>
+        <section class="page page-c" data-p="c2"><h2 class="sr">更早的 session</h2><div class="feed" id="pc2Feed"></div></section>
+        <section class="page page-d" data-p="d"><h2 class="sr">每日用量</h2><div class="dwrap" id="pdHeat"></div></section>
+        <section class="page page-e" data-p="e"><h2 class="sr">今日 AI 大事</h2><div class="ewrap" id="peNews"></div></section>
         <section class="page page-attn" data-p="attn"><h2 class="sr">需要你</h2><div id="paAttn"></div></section>
         <button type="button" class="edge" data-side="prev" aria-label="上一页"></button>
         <button type="button" class="edge" data-side="next" aria-label="下一页"></button>
-        <div class="dots" id="dots" data-not-accent>
-          <span class="holdmark" id="holdmark" data-not-accent hidden>&#8214;</span>
-          <button type="button" data-p="a" data-not-accent aria-label="第 1 页 总览"></button>
-          <button type="button" data-p="b" data-not-accent aria-label="第 2 页 额度详情"></button>
-          <button type="button" data-p="c" data-not-accent aria-label="第 3 页 事件"></button>
-        </div>
+        <div class="dots" id="dots" data-not-accent></div>
       </div>
     </div>
     <p class="sr" role="status" aria-live="polite" id="live"></p>
@@ -1239,6 +1359,945 @@ html[data-rm="1"] .page{transform:none!important}
   }
  ]
 }</script>
+<script type="application/json" id="fx-usage">{
+ "generatedAt": "2026-09-14T19:35:19+08:00",
+ "sources": {
+  "codex": "codexbar cost --provider codex (daily totalTokens)",
+  "claude": "codexbar cost --provider claude (daily totalTokens)",
+  "zcode": "~/.zcode/cli/log/zcode-*.jsonl model.request.completed count"
+ },
+ "note": "intensity = mean of per-agent normalized usage (0–1); units differ per agent",
+ "weeks": 8,
+ "days": [
+  {
+   "date": "2026-07-21",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-07-22",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-07-23",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-07-24",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-07-25",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-07-26",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-07-27",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-07-28",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-07-29",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-07-30",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-07-31",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-01",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-02",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-03",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-04",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-05",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-06",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-07",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-08",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-09",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-10",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-11",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-12",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-13",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-14",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-15",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-16",
+   "byAgent": {
+    "codex": {
+     "tokens": 15956197
+    },
+    "claude": {
+     "tokens": 366682825
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.502,
+   "total": 382639022
+  },
+  {
+   "date": "2026-08-17",
+   "byAgent": {
+    "codex": {
+     "tokens": 6360528
+    },
+    "claude": {
+     "tokens": 700012382
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.455,
+   "total": 706372910
+  },
+  {
+   "date": "2026-08-18",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 581110976
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.267,
+   "total": 581110976
+  },
+  {
+   "date": "2026-08-19",
+   "byAgent": {
+    "codex": {
+     "tokens": 297239
+    },
+    "claude": {
+     "tokens": 201426337
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.099,
+   "total": 201723576
+  },
+  {
+   "date": "2026-08-20",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 54641410
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.025,
+   "total": 54641410
+  },
+  {
+   "date": "2026-08-21",
+   "byAgent": {
+    "codex": {
+     "tokens": 2097182
+    },
+    "claude": {
+     "tokens": 363231950
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.211,
+   "total": 365329132
+  },
+  {
+   "date": "2026-08-22",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-23",
+   "byAgent": {
+    "codex": {
+     "tokens": 5253417
+    },
+    "claude": {
+     "tokens": 283289469
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.24,
+   "total": 288542886
+  },
+  {
+   "date": "2026-08-24",
+   "byAgent": {
+    "codex": {
+     "tokens": 3325511
+    },
+    "claude": {
+     "tokens": 269427815
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.193,
+   "total": 272753326
+  },
+  {
+   "date": "2026-08-25",
+   "byAgent": {
+    "codex": {
+     "tokens": 2645527
+    },
+    "claude": {
+     "tokens": 219229163
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.156,
+   "total": 221874690
+  },
+  {
+   "date": "2026-08-26",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 724702245
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.333,
+   "total": 724702245
+  },
+  {
+   "date": "2026-08-27",
+   "byAgent": {
+    "codex": {
+     "tokens": 5165696
+    },
+    "claude": {
+     "tokens": 171602645
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.187,
+   "total": 176768341
+  },
+  {
+   "date": "2026-08-28",
+   "byAgent": {
+    "codex": {
+     "tokens": 76801
+    },
+    "claude": {
+     "tokens": 194969966
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.091,
+   "total": 195046767
+  },
+  {
+   "date": "2026-08-29",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-08-30",
+   "byAgent": {
+    "codex": {
+     "tokens": 13714358
+    },
+    "claude": {
+     "tokens": 33802144
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.302,
+   "total": 47516502
+  },
+  {
+   "date": "2026-08-31",
+   "byAgent": {
+    "codex": {
+     "tokens": 378522
+    },
+    "claude": {
+     "tokens": 47980750
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.03,
+   "total": 48359272
+  },
+  {
+   "date": "2026-09-01",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 181663084
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.084,
+   "total": 181663084
+  },
+  {
+   "date": "2026-09-02",
+   "byAgent": {
+    "codex": {
+     "tokens": 3562476
+    },
+    "claude": {
+     "tokens": 292109710
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.209,
+   "total": 295672186
+  },
+  {
+   "date": "2026-09-03",
+   "byAgent": {
+    "codex": {
+     "tokens": 5248468
+    },
+    "claude": {
+     "tokens": 400512723
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.294,
+   "total": 405761191
+  },
+  {
+   "date": "2026-09-04",
+   "byAgent": {
+    "codex": {
+     "tokens": 2910310
+    },
+    "claude": {
+     "tokens": 11454767
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.066,
+   "total": 14365077
+  },
+  {
+   "date": "2026-09-05",
+   "byAgent": {
+    "codex": {
+     "tokens": 7541522
+    },
+    "claude": {
+     "tokens": 12584538
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.163,
+   "total": 20126060
+  },
+  {
+   "date": "2026-09-06",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 6709081
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.003,
+   "total": 6709081
+  },
+  {
+   "date": "2026-09-07",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 129589505
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.06,
+   "total": 129589505
+  },
+  {
+   "date": "2026-09-08",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 247098584
+    },
+    "zcode": {
+     "requests": 101
+    }
+   },
+   "intensity": 0.141,
+   "total": 247098584
+  },
+  {
+   "date": "2026-09-09",
+   "byAgent": {
+    "codex": {
+     "tokens": 1107580
+    },
+    "claude": {
+     "tokens": 492089555
+    },
+    "zcode": {
+     "requests": 1216
+    }
+   },
+   "intensity": 0.583,
+   "total": 493197135
+  },
+  {
+   "date": "2026-09-10",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 71915158
+    },
+    "zcode": {
+     "requests": 746
+    }
+   },
+   "intensity": 0.238,
+   "total": 71915158
+  },
+  {
+   "date": "2026-09-11",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 203090115
+    },
+    "zcode": {
+     "requests": 88
+    }
+   },
+   "intensity": 0.118,
+   "total": 203090115
+  },
+  {
+   "date": "2026-09-12",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-09-13",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 0
+    },
+    "zcode": {
+     "requests": 0
+    }
+   },
+   "intensity": 0.0,
+   "total": 0
+  },
+  {
+   "date": "2026-09-14",
+   "byAgent": {
+    "codex": {
+     "tokens": 0
+    },
+    "claude": {
+     "tokens": 227882759
+    },
+    "zcode": {
+     "requests": 233
+    }
+   },
+   "intensity": 0.169,
+   "total": 227882759
+  }
+ ]
+}</script>
+<script type="application/json" id="fx-news">{
+ "generatedAt": "2026-09-14T19:35:19+08:00",
+ "source": "AIHOT /api/v1/items?mode=selected&window=24h&limit=5 (personal non-commercial use; attribution required)",
+ "attribution": "数据来源：AIHOT",
+ "items": [
+  {
+   "title": "小红书 AllSpark 开源 Search Agent 模型 Iris，35B 与 397B 版本同量级成绩领先",
+   "summary": "小红书 AllSpark 团队发布并开源 Search Agent 模型 Iris，权重和评测代码已公开，数据与训练配方将陆续公布。",
+   "source": "公众号：小红书技术（dots.llm）",
+   "url": null,
+   "at": "2026-09-14T09:59:00.000Z",
+   "reason": "原文给出了数据构造、SFT-RL 训练和统一评测的完整思路，读者可以据此理解 Search Agent 的训练难点与可迁移方法。"
+  },
+  {
+   "title": "Gary Marcus 评 Dario Amodei 的放慢 AI 发展提议：三份赞誉加两分怀疑",
+   "summary": "Gary Marcus 评析 Dario Amodei 倡导放慢 AI 发展并支持透明度的文章，Sam Altman 与 Elon Musk 迅速表示认同。Marcus 肯定其透明度承诺，但列举多方质疑：METR 与 AI 公司关系过近、Anthropic 借对华威胁维持加速、以及该提议可能意在抢先于真正的监管。",
+   "source": "Gary Marcus：The Road to AI We Can Trust（RSS）",
+   "url": null,
+   "at": "2026-09-13T18:34:31.000Z",
+   "reason": "作者肯定 Dario 提议中放慢节奏与透明度的部分，同时汇总多方对监管俘获、评估方独立性和对华姿态的质疑，并补充追责与召回两条政策思路。"
+  },
+  {
+   "title": "Anthropic 报告称胡塞组织用 Claude Code 开发导弹制导软件",
+   "summary": "Anthropic 9 月威胁报告披露，据评估极可能关联胡塞组织的也门小组使用 Claude Code 开发制导火箭、射程超 2，000 公里弹道导弹及名为 R2000 的高超声速滑翔载具概念的相关软件。",
+   "source": "Hacker News：AI 热帖",
+   "url": null,
+   "at": "2026-09-13T14:15:40.000Z",
+   "reason": "原文梳理了 Anthropic 威胁报告中也门组织用 Claude Code 并行推进导弹研发的完整链条，可帮助读者理解 AI 滥用如何绕过安全防护。"
+  }
+ ]
+}</script>
 
 <script>
 (() => {
@@ -1251,6 +2310,8 @@ const now  = () => NOW0 + (Date.now() - BOOT);
 
 const QUOTA  = JSON.parse(document.getElementById("fx-quota").textContent);
 const EVENTS = JSON.parse(document.getElementById("fx-events").textContent).events;
+const USAGE  = JSON.parse(document.getElementById("fx-usage").textContent);
+const NEWS   = JSON.parse(document.getElementById("fx-news").textContent);
 
 const AGENTS = {
   codex : {id:"codex",  name:"Codex",       tag:"Codex",  color:"var(--id-codex)" },
@@ -1277,6 +2338,15 @@ const whenFmt = (iso, ref) => {
   return sameDay(d, new Date(ref)) ? hhmm(d) : `${d.getMonth()+1}/${d.getDate()} ${hhmm(d)}`;
 };
 const level = p => p >= 95 ? "danger" : p >= 80 ? "warn" : "ok";
+/* 新闻页专用的短相对时间。AIHOT 的窗口是 24 小时，通用 whenFmt 的跨天串
+   「9/13 02:34」要 84px，在这一行里买不起；这里最长是「23 小时前」约 56px。 */
+const newsWhen = (iso, ref) => {
+  const d = new Date(iso), diff = ref - d.getTime();
+  if (diff < 60000) return "刚刚";
+  if (diff < 3600000) return `${Math.floor(diff / 60000)} 分钟前`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)} 小时前`;
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+};
 const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const WIN5H = 5*3600*1000;
 const KIND_LABEL = {running:"运行中", failed:"失败", attention:"等待批准", completed:"已完成"};
@@ -1306,7 +2376,32 @@ const pick = id => SRC.find(e => e.id.startsWith(id));
 const toItem = (e, over) => Object.assign({
   id:e.id, agent:e.agent, kind:e.kind, title:e.title, summary:e.summary || "", at:e.at, unread:false,
 }, over || {});
-const BASE_FEED = SRC.slice(0, 6).map((e, i) => toItem(e, {unread: i === 0}));
+const BASE_FEED_RAW = SRC.slice(0, 8).map(e => toItem(e));
+/* v2 · 行上的时间是「最后更新时间」（最后一条消息 / 最后一次状态变化），不是开始时间。
+   completed / failed 的 at 本来就是完成时刻；running 没完成，它的最后更新随消息推进，
+   所以单独给一个会走的时间戳——屏上从「刚刚」开始往后爬。
+   排序：running 最前，其余按最后更新倒序。 */
+const lastUpdateOf = it => it.lastUpdate || it.at;
+function sortSessions(items){
+  return [...items].sort((x, y) => {
+    const rx = x.kind === "running" ? 1 : 0, ry = y.kind === "running" ? 1 : 0;
+    if (rx !== ry) return ry - rx;
+    return new Date(lastUpdateOf(y)) - new Date(lastUpdateOf(x));
+  });
+}
+/* 未读打在排序后的首条上：排序键是「最后更新时间」，所以首条才是「最新的一件事」 */
+const BASE_FEED = (() => {
+  const list = sortSessions(BASE_FEED_RAW);
+  if (list.length) list[0] = {...list[0], unread:true};
+  return list;
+})();
+const PER_PAGE = 4;
+function sessionsFor(which){
+  const f = scene && scene.feed;
+  if (!f || !f.items) return [];
+  const all = sortSessions(f.items);
+  return which === "c1" ? all.slice(0, PER_PAGE) : all.slice(PER_PAGE, PER_PAGE * 2);
+}
 const CODEX_OK = QUOTA.codex.windows, CLAUDE_OK = QUOTA.claude.windows, ZCODE_OK = QUOTA.zcode.windows;
 /* Key 已进 Keychain，额度接口实测可用 —— 「未连接」从静止态退成 empty 态的一种
    （Key 缺失时才出现）。ZCode 的 5h 是 61%：落在 ok 区间但离 warn 只差 19 个点，
@@ -1362,17 +2457,24 @@ const SCENES = {
     feed:{phase:"ok", items:[
       {id:"run1", agent:"codex", kind:"running", unread:false,
        title:"构造 v0.3 盲判任务分类样本", summary:"已处理 412 / 710 条",
-       startedAt:"2026-09-14T14:29:09+08:00", at:"2026-09-14T14:29:09+08:00"},
+       startedAt:"2026-09-14T14:29:09+08:00", at:"2026-09-14T14:29:09+08:00",
+       lastUpdate:"2026-09-14T16:32:46+08:00"},   /* 最后一条消息：2 秒前，屏上先显示「刚刚」 */
       ...BASE_FEED.slice(1, 4).map((x,i) => ({...x, unread:i === 0}))]}}),
 };
 
-const ROW_BUDGET = 4;                       /* C 页：1 放大 + 3 行，简报是 3–4 条 */
-const ORDER = ["a", "b", "c"];
+const screenW = () => parseFloat(getComputedStyle(root).getPropertyValue("--screen-w")) || 480;
+/* v2 页序：A 总览 → B 额度 → C1/C2 session → D 用量热力图 → E 今日 AI。
+   C2 为空时跳过，指示点最多 6 个。 */
+const ORDER_ALL = ["a", "b", "c1", "c2", "d", "e"];
+const pagesInRotation = () =>
+  ORDER_ALL.filter(p => p !== "c2" || sessionsFor("c2").length > 0);
 
 const root = document.documentElement;
 const el = {
   paTiles:document.getElementById("paTiles"), pbBands:document.getElementById("pbBands"),
-  pcFeed:document.getElementById("pcFeed"),   paAttn:document.getElementById("paAttn"),
+  pc1Feed:document.getElementById("pc1Feed"), pc2Feed:document.getElementById("pc2Feed"),
+  pdHeat:document.getElementById("pdHeat"),   peNews:document.getElementById("peNews"),
+  paAttn:document.getElementById("paAttn"),
   feedTitle:document.getElementById("feedTitle"), dots:document.getElementById("dots"),
   legend:document.getElementById("legend"), live:document.getElementById("live"),
   meter:document.getElementById("meter"), unread:document.getElementById("unread"),
@@ -1402,9 +2504,13 @@ const cssMs = name => {
 const DWELL = () => ({a:cssMs("--dwell-a"), b:cssMs("--dwell-b"), c:cssMs("--dwell-c")});
 
 const CAPTIONS = {
+  c1:"<b>C1 session · 谁刚做完。</b>最近 4 个 session，running 置顶且时间逐秒走；行上的时间是<b>最后更新时间</b>（最后一条消息 / 最后一次状态变化），不是开始时间。",
+  c2:"<b>C2 session · 更早的 4 个。</b>C1 满 4 行才溢出到这里；为空时整页跳过不轮播，指示点也少一个。",
+  d:"<b>D 每日用量 · 我用得多不多。</b>7 行 × N 周的格子，五档中性明度阶（顶档就是额度填充的 --charcoal，含义一致：这是数据不是强调），格子不按 agent 分色。←→ 移焦点，焦点格在下方报出当天三家各自的真实用量。",
+  e:"<b>E 今日 AI · AIHOT。</b>五条等权，这一页是阅读不是扫视，所以第一条不放大。不打断、不响铃、不计未读。",
   a:"<b>A 总览 — 还剩多少。</b>三块瓦片横排，64px 百分比是全屏唯一能从座位上一眼读到的东西；7d 不显示，倒计时提到 18px。停留 10s —— 它是回归页，占掉一轮 22s 的将近一半，随机一瞥才有足够概率命中它。",
   b:"<b>B 额度详情 — 够不够撑到重置。</b>三条竖向时间带，填充与「现在」游标画在同一根轴上，右端是重置刻度；判语只留结论「按这个速度用不完 / 会提前用尽」。停留 6s。",
-  c:"<b>C 事件 — 谁刚做完。</b>最新一条 20px 单行放大 + 三行 16px；没有未读计数、没有「另 N 条更早」，未读只靠最新行自己的强调表达。停留 6s；新事件进来立刻跳到这里并停 20s。",
+  cLegacy:"<b>C 事件 — 谁刚做完。</b>最新一条 20px 单行放大 + 三行 16px；没有未读计数、没有「另 N 条更早」，未读只靠最新行自己的强调表达。停留 6s；新事件进来立刻跳到这里并停 20s。",
   attn:"<b>attention — 谁在等我。</b>整屏专用页接管，轮播暂停直到解除。28px「等待你」+ 18px 一句话说明 + 等了多久。这是全屏唯一会打断轮播的状态。",
 };
 
@@ -1442,6 +2548,17 @@ function renderPageA(){
   }).join("");
 }
 
+/* 当前窗口内用得最多的模型。ZCode 的是 events.json 里 source 字段的真实值；
+   Codex / Claude 的会话记录里没有模型名字段，先用简报给的例子占位，M1 接真实数据。
+   字体用 sans（Inter）而不是 mono：模型名是专名不是数字，混合大小写在 Inter 下
+   字形区分更好，mono 会把 "Fable 5.1" 里的字母也拉成等宽，读起来像代码。 */
+/* 三个值现在都有真实出处（m3-executor 在本机取到）：Codex 从 turn_context.payload.model、
+   ZCode 从 tasks 表、Claude 从 ~/.claude/projects 递归统计 assistant 行的 message.model
+   （子 agent 的记录在更深两层，只扫平铺目录会漏掉大半）。原型没有模型 fixture，
+   所以写死本机实测值而不是简报的举例值——显示一个已知为假的名字比显示静态真值更糟。 */
+const TOP_MODEL = {codex:"gpt-6-astra", claude:"Opus 5", zcode:"GLM-5.3-Flash"};
+const topModel = id => TOP_MODEL[id] || "—";
+
 /* ---------- 渲染：B 页 ---------- */
 function renderPageB(){
   el.pbBands.innerHTML = scene.tiles.map(t => {
@@ -1464,7 +2581,7 @@ function renderPageB(){
       const w5 = t.windows[0], w7 = t.windows[1];
       const start = new Date(w5.resetsAt).getTime() - WIN5H;
       inner = `<div class="b-head">${nameCell}
-        <span class="b-verdict" data-verdict="${start}" data-used="${w5.usedPercent}" data-status="${t.status}"></span>
+        <span class="b-verdict" data-model="${esc(topModel(t.agent))}" data-status="${t.status}"></span>
         <span class="b-pc mono">${w5.usedPercent}%</span>
         ${w7 ? `<span class="b-sec mono">${esc(w7.label)} ${w7.usedPercent}%</span>` : ""}
         <span class="b-cd mono" data-cd="${esc(w5.resetsAt)}"></span></div>
@@ -1484,9 +2601,10 @@ function rowHTML(it, isLead, aged){
   const a = AGENTS[it.agent];
   const icon = it.kind === "failed" ? "alert" : it.kind === "attention" ? "ret"
              : it.kind === "running" ? "dot" : "check";
-  const timeAttr = it.kind === "running" ? `data-elapsed="${esc(it.startedAt)}"` : `data-when="${esc(it.at)}"`;
-  const when = it.kind === "running"
-    ? elapsedFmt(now() - new Date(it.startedAt).getTime()) : whenFmt(it.at, now());
+  /* v2 · 时间一律是「最后更新时间」，running 也是——它随消息推进，所以会逐秒往后爬 */
+  const lu = lastUpdateOf(it);
+  const timeAttr = `data-when="${esc(lu)}"`;
+  const when = whenFmt(lu, now());
   const label = `${a.name} · ${KIND_LABEL[it.kind] || KIND_LABEL.completed} · ${it.title} · ${when}` +
                 (it.unread ? " · 未读，按 Enter 标记已读" : "");
   const first = it.kind === "attention"
@@ -1500,28 +2618,163 @@ function rowHTML(it, isLead, aged){
     `<span class="rkind" data-kind="${it.kind}">${svg(icon,14)}</span>` +
     `<span class="rmark"></span></button>`;
 }
+/* v2 · C 拆成 C1 / C2，每页 4 行。放大的那一条只在 C1 的首位——它是「最新的一件事」，
+   C2 是溢出页，四行等权。 */
 function renderPageC(){
   const f = scene.feed;
-  el.feedTitle.textContent = FEED_TITLE[state] || "最近完成";
-  if (f.phase === "loading"){
-    el.pcFeed.innerHTML = `<div class="feed-skel"><i></i><i></i><i></i>
-      <span class="loading-label" role="status" style="padding:4px 8px 0">读取中</span></div>`;
-    return;
-  }
-  if (f.phase === "msg"){
-    el.pcFeed.innerHTML = `<div class="feed-msg msg" data-tone="${f.msg.tone}">
+  el.feedTitle.textContent = FEED_TITLE[state] || "最近的 session";
+  const skel = `<div class="feed-skel"><i></i><i></i><i></i><i></i>
+      <span class="loading-label sr" role="status">读取中</span></div>`;
+  const msg = f.phase === "msg" ? `<div class="feed-msg msg" data-tone="${f.msg.tone}">
       <div class="msg-head">${svg(f.msg.icon,15)}<span>${esc(f.msg.title)}</span></div>
-      <p>${esc(f.msg.why)}</p></div>`;
-    return;
-  }
-  const shown = f.items.slice(0, ROW_BUDGET);
-  const attn = shown.some(x => x.kind === "attention");
+      <p>${esc(f.msg.why)}</p></div>` : "";
+  if (f.phase === "loading"){ el.pc1Feed.innerHTML = skel; el.pc2Feed.innerHTML = ""; return; }
+  if (f.phase === "msg"){ el.pc1Feed.innerHTML = msg; el.pc2Feed.innerHTML = ""; return; }
+
+  const all = sortSessions(f.items);
+  const attn = all.some(x => x.kind === "attention");
   let spent = false;
-  el.pcFeed.innerHTML = shown.map((it, i) => {
+  const paint = (list, withLead) => list.map((it, i) => {
     const full = !spent && (attn ? it.kind === "attention" : it.unread);
     if (full) spent = true;
-    return rowHTML(it, i === 0, it.unread && !full);
+    return rowHTML(it, withLead && i === 0, it.unread && !full);
   }).join("");
+  el.pc1Feed.innerHTML = paint(all.slice(0, PER_PAGE), true);
+  el.pc2Feed.innerHTML = paint(all.slice(PER_PAGE, PER_PAGE * 2), false);
+  tickFeed();
+}
+
+/* ==========================================================================
+   D 页 · 每日用量热力图
+   ==========================================================================
+   usage.json 的 total 是三家数值的裸和，而三家单位不同（Codex / Claude 是 token，
+   ZCode 是请求次数），所以 total 作为一个要展示的数字没有意义。分档用 intensity
+   （每家各自归一化后取均值，0–1），tooltip 则按各自的真实单位分别报——
+   与其编一个「统一的请求次数」，不如如实说三家各是多少。 */
+const fmtNum = v => v >= 1e8 ? (v / 1e8).toFixed(1) + "亿"
+                  : v >= 1e4 ? (v / 1e4).toFixed(1) + "万" : String(v);
+const DAY_LABEL = ["一", "", "三", "", "五", "", "日"];   /* 隔行标，免得 14px 挤成一片 */
+
+function heatLevel(intensity, max){
+  if (!intensity) return 0;
+  const t = max > 0 ? intensity / max : 0;
+  return Math.min(4, 1 + Math.floor(t * 4 - 1e-9));
+}
+function renderPageD(){
+  const st = scene.dataState;
+  if (st !== "ok"){
+    el.pdHeat.innerHTML = st === "loading"
+      ? `<div class="feed-skel"><i style="height:20px"></i><i style="height:104px"></i>
+         <span class="loading-label" role="status">读取中</span></div>`
+      : `<div class="feed-msg msg" data-tone="${st === "error" ? "error" : "empty"}">
+         <div class="msg-head">${svg(st === "error" ? "radio" : "inbox", 15)}<span>${
+           st === "error" ? "用量数据读取失败" : "还没有用量数据"}</span></div>
+         <p>${st === "error" ? "codexbar cost 调用超时，10 分钟后重试" : "跑满一天后这里会出现第一格"}</p></div>`;
+    return;
+  }
+  const days = USAGE.days || [];
+  const maxI = days.reduce((m, d) => Math.max(m, d.intensity || 0), 0);
+  /* 列数由画布宽度决定：每列 cell+2px，减去星期标签列与间隙 */
+  const cell = 13;
+  const avail = el.pdHeat.clientWidth || (screenW() - 16);
+  const cols = Math.max(4, Math.min(Math.ceil(days.length / 7), Math.floor((avail - 26 - 8 + 2) / (cell + 2))));
+  const shown = days.slice(-cols * 7);
+  /* 第一格对齐到周一：JS 的 getDay() 周日是 0 */
+  const firstIdx = (new Date(shown[0].date).getDay() + 6) % 7;
+  const cellsHtml = Array.from({length: firstIdx}, () =>
+      `<span class="cell" data-void="1" aria-hidden="true"></span>`).join("") +
+    shown.map(d => {
+      const lv = heatLevel(d.intensity, maxI);
+      return `<button type="button" class="cell" data-l="${lv}" data-date="${esc(d.date)}" ` +
+        `tabindex="-1" aria-label="${esc(d.date)} 用量第 ${lv} 档"></button>`;
+    }).join("");
+  /* 周数按真实数据跨度报，不按补齐后的列数——补出来的那一格不是一周 */
+  const weeks = USAGE.weeks || Math.round(shown.length / 7);
+  el.pdHeat.innerHTML = `
+    <div class="d-head"><span class="d-title">每日用量 · 近 ${weeks} 周</span>
+      <span class="d-legend">${["codex","claude","zcode"].map(id =>
+        `<span style="--idc:${AGENTS[id].color}"><i></i>${esc(AGENTS[id].tag)}</span>`).join("")}</span></div>
+    <div class="d-grid" style="--cell:${cell}px">
+      <div class="d-days">${DAY_LABEL.map(x => `<span>${x}</span>`).join("")}</div>
+      <div class="d-cells" id="dCells">${cellsHtml}</div>
+    </div>
+    <div class="d-tip" id="dTip"></div>`;
+  const cells = [...el.pdHeat.querySelectorAll(".cell[data-date]")];
+  const byDate = Object.fromEntries(days.map(d => [d.date, d]));
+  const tip = el.pdHeat.querySelector("#dTip");
+  const showTip = c => {
+    const d = byDate[c.dataset.date];
+    if (!d) return;
+    const b = d.byAgent || {};
+    const parts = [];
+    if (b.codex)  parts.push(`Codex ${fmtNum(b.codex.tokens || 0)} tok`);
+    if (b.claude) parts.push(`Claude ${fmtNum(b.claude.tokens || 0)} tok`);
+    if (b.zcode)  parts.push(`ZCode ${fmtNum(b.zcode.requests || 0)} 次`);
+    tip.innerHTML = `<b>${esc(d.date)}</b><span class="dim">${esc(parts.join(" · "))}</span>` +
+      `<span class="d-scale">${[0,1,2,3,4].map(l =>
+        `<i style="background:var(--heat-${l})"></i>`).join("")}</span>`;
+    cells.forEach(x => x.tabIndex = x === c ? 0 : -1);
+  };
+  cells.forEach((c, i) => {
+    c.addEventListener("mouseenter", () => showTip(c));
+    c.addEventListener("focus", () => showTip(c));
+    c.addEventListener("keydown", e => {
+      const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+      if (!d) return;
+      const t = cells[i + d];
+      if (t){ t.focus(); e.preventDefault(); e.stopPropagation(); }
+    });
+  });
+  if (cells.length){ cells[cells.length - 1].tabIndex = 0; showTip(cells[cells.length - 1]); }
+}
+
+/* ==========================================================================
+   E 页 · 今日 AI 大事（AIHOT）。不打断、不响铃、不计未读。
+   ========================================================================== */
+function renderPageE(){
+  const st = scene.dataState;
+  const items = (NEWS.items || []).slice(0, 5);
+  if (st === "loading"){
+    el.peNews.innerHTML = `<div class="feed-skel">${"<i style=\"height:30px\"></i>".repeat(5)}
+      <span class="loading-label" role="status">读取中</span></div>`;
+    return;
+  }
+  if (st === "error"){
+    el.peNews.innerHTML = `<div class="feed-msg msg" data-tone="error">
+      <div class="msg-head">${svg("radio",15)}<span>AIHOT 暂时连不上</span></div>
+      <p>30 分钟后重试，期间显示上一次的结果</p></div>`;
+    return;
+  }
+  if (st === "empty" || !items.length){
+    el.peNews.innerHTML = `<div class="feed-msg msg" data-tone="empty">
+      <div class="msg-head">${svg("inbox",15)}<span>今天还没有精选</span></div>
+      <p>AIHOT 的精选是人工策展，空窗期很正常</p></div>`;
+    return;
+  }
+  const edge = st === "edge";
+  el.peNews.innerHTML = `
+    <div class="e-head"><span class="e-title">今日 AI · AIHOT</span>
+      <span class="e-upd" data-when="${esc(NEWS.generatedAt)}"></span></div>
+    <div class="e-list">${items.map((it, i) => {
+      const title = edge && i === 0
+        ? it.title + "（" + "超长标题压力测试".repeat(5) + "）" : it.title;
+      const src = edge && i === 1
+        ? it.source + " · 一个长得离谱的来源名称用来撑破这一列" : it.source;
+      return `<div class="e-item">
+        <span class="e-no">${i + 1}</span>
+        <span class="e-t">${esc(title)}</span>
+        <span class="e-meta"><span class="e-src">${esc(src)}</span>
+          <span class="e-time" data-newswhen="${esc(it.at)}"></span></span>
+      </div>`;
+    }).join("")}</div>
+    <div class="e-foot">${esc(NEWS.attribution || "数据来源：AIHOT")}</div>`;
+  /* 标题行数由实测的行高决定，而不是按画布高度一刀切：AIHOT 今天只给了 3 条，
+     270 的画布上每条有 48px，放得下两行；满 5 条时每条只剩 27px，自动退回一行。 */
+  const list = el.peNews.querySelector(".e-list");
+  if (list){
+    const per = (list.clientHeight - 4 * (items.length - 1)) / Math.max(1, items.length);
+    el.peNews.style.setProperty("--e-lines", String(Math.max(1, Math.min(3, Math.floor(per / 19)))));
+  }
   tickFeed();
 }
 
@@ -1572,18 +2825,20 @@ function tickTiles(){
     const pct = Math.max(0, Math.min(100, ((t - Number(n.dataset.caret)) / WIN5H) * 100));
     n.style.left = pct.toFixed(2) + "%";
   });
-  document.querySelectorAll("[data-verdict]").forEach(n => {
-    const pct = Math.max(0, Math.min(100, ((t - Number(n.dataset.verdict)) / WIN5H) * 100));
-    const used = Number(n.dataset.used), over = used > pct, st = n.dataset.status;
+  /* v2 · 判语整句删掉，原位置改显示当前窗口用得最多的模型名。
+     「够不够撑到重置」不丢：它由时间带上填充与「现在」游标的落差承担，
+     不再用一句话复述——那句话在 14px 上本来也只是被扫过去而不是被读。 */
+  document.querySelectorAll("[data-model]").forEach(n => {
+    const st = n.dataset.status;
     if (st === "attention"){ n.dataset.tone = "attn"; n.textContent = "等待你批准"; return; }
-    n.dataset.tone = over ? "over" : "under";
-    const verdict = over ? "按这个速度会提前用尽" : "按这个速度用不完";
-    n.textContent = st === "running" ? `运行中 · ${verdict}` : verdict;
+    n.dataset.tone = "model";
+    n.textContent = st === "running" ? `运行中 · ${n.dataset.model}` : n.dataset.model;
   });
 }
 function tickFeed(){
   const t = now();
   document.querySelectorAll("[data-when]").forEach(n => n.textContent = whenFmt(n.dataset.when, t));
+  document.querySelectorAll("[data-newswhen]").forEach(n => n.textContent = newsWhen(n.dataset.newswhen, t));
   document.querySelectorAll("[data-elapsed]").forEach(n =>
     n.textContent = elapsedFmt(t - new Date(n.dataset.elapsed).getTime()));
   document.querySelectorAll("[data-elapsed2]").forEach(n =>
@@ -1607,7 +2862,7 @@ function announceThresholds(){
 /* 三页一律 --dwell-*（默认 60s）。「空闲加速」已作废：慢轮播之后回归不靠频率，
    靠的是打断——新事件与 attention 会主动把该看的推到眼前。 */
 function dwellFor(p){
-  if (p === "c" && eventHold) return cssMs("--dwell-event");
+  if (p === "c1" && eventHold) return cssMs("--dwell-event");
   const d = DWELL();
   return p === "a" ? d.a : p === "b" ? d.b : d.c;
 }
@@ -1624,13 +2879,22 @@ function showPage(p, {reset = true} = {}){
     n.setAttribute("aria-hidden", on ? "false" : "true");
   });
   /* attention 页三点全暗，读作「当前不在轮播的三页里」—— 这本身就是状态信息 */
-  el.dots.querySelectorAll("button").forEach(n => n.dataset.on = n.dataset.p === p ? "1" : "0");
+  renderDots(p);
   el.holdmark.hidden = !(Date.now() < holdUntil);
   if (reset) dwellUntil = Date.now() + dwellFor(p);
   if (holdUntil && Date.now() >= holdUntil) holdUntil = 0;
   syncTopbar();
   syncSegs();
   el.legend.innerHTML = CAPTIONS[p];
+}
+
+const PAGE_LABEL = {a:"总览", b:"额度详情", c1:"session", c2:"更早的 session", d:"每日用量", e:"今日 AI"};
+function renderDots(p){
+  const L = pagesInRotation();                 /* C2 空时它不在列表里，点也就少一个 */
+  el.dots.innerHTML = `<span class="holdmark" id="holdmark" data-not-accent hidden>&#8214;</span>` +
+    L.map((q, i) => `<button type="button" data-p="${esc(q)}" data-not-accent ` +
+      `data-on="${q === p ? 1 : 0}" aria-label="第 ${i + 1} 页 ${esc(PAGE_LABEL[q] || q)}"></button>`).join("");
+  el.holdmark = document.getElementById("holdmark");
 }
 
 /* 手动切页：暂停轮播 --manual-hold（120s）。打断优先级不变——
@@ -1642,8 +2906,9 @@ function manualTo(p){
 }
 function stepPage(d){
   if (attnActive) return;
-  const i = ORDER.indexOf(page);
-  manualTo(ORDER[((i < 0 ? 0 : i) + d + ORDER.length) % ORDER.length]);
+  const i = pagesInRotation().indexOf(page);
+  const L = pagesInRotation();
+  manualTo(L[((i < 0 ? 0 : i) + d + L.length) % L.length]);
 }
 
 function rotateTick(){
@@ -1653,9 +2918,10 @@ function rotateTick(){
      评审者没法用控制栏核对其它页。给手动切页 10s 宽限（工具层，不进画布）。 */
   if (attnActive){ if (Date.now() > manualHold) showPage("attn", {reset:false}); return; }
   if (Date.now() < dwellUntil) return;
-  if (page === "c" && eventHold) eventHold = false;   /* 20s 钉住到期 */
-  const i = ORDER.indexOf(page);
-  showPage(ORDER[(i < 0 ? 0 : i + 1) % ORDER.length]);
+  if (page === "c1" && eventHold) eventHold = false;  /* 新事件钉住到期 */
+  const L = pagesInRotation();
+  const i = L.indexOf(page);
+  showPage(L[(i < 0 ? 0 : i + 1) % L.length]);
 }
 
 function updateMeter(){
@@ -1684,9 +2950,11 @@ function syncTopbar(){
 /* ---------- 渲染入口 ---------- */
 function render(){
   scene = SCENES[state]();
+  /* D / E 两页的数据是独立来源，但要跟着控制栏的七态一起演示 */
+  scene.dataState = ({loading:"loading", empty:"empty", error:"error", edge:"edge"})[state] || "ok";
   root.dataset.state = state;
   attnActive = !!attnItem();
-  renderPageA(); renderPageB(); renderPageC(); renderPageAttn();
+  renderPageA(); renderPageB(); renderPageC(); renderPageD(); renderPageE(); renderPageAttn();
   tickTiles(); tickFeed(); tickClocks();
   announceThresholds();
   if (state === "loading") el.live.textContent = "正在读取三个 agent 的额度与事件";
@@ -1732,14 +3000,14 @@ function pushEvent(){
   const item = {id:"new"+seq+"-"+Date.now(), agent:s.agent, kind:"completed",
     title:s.title, summary:s.summary, at:new Date(now()).toISOString(), unread:true};
   const anim = motionOn(), before = new Map();
-  if (anim) el.pcFeed.querySelectorAll(".row").forEach(r => before.set(r.dataset.id, r.getBoundingClientRect().top));
+  if (anim) el.pc1Feed.querySelectorAll(".row").forEach(r => before.set(r.dataset.id, r.getBoundingClientRect().top));
   scene.feed.items.unshift(item);
   eventHold = true;
   holdUntil = 0;                           /* 打断优先级不变：新事件盖过手动暂停 */
   renderPageC();
   /* 立刻跳到 C 页并停 --dwell-event；期间再来一条会重置这 20s */
-  showPage("c");
-  if (anim) el.pcFeed.querySelectorAll(".row").forEach(r => {
+  showPage("c1");
+  if (anim) el.pc1Feed.querySelectorAll(".row").forEach(r => {
     const prev = before.get(r.dataset.id);
     if (prev == null){ r.classList.add("enter"); return; }
     const d = prev - r.getBoundingClientRect().top;
@@ -1774,7 +3042,7 @@ function toggleAttn(){
 }
 
 /* ---------- ack ---------- */
-el.pcFeed.addEventListener("click", e => {
+[el.pc1Feed, el.pc2Feed].forEach(box => box.addEventListener("click", e => {
   const row = e.target.closest(".row");
   if (!row || !scene.feed.items) return;
   const it = scene.feed.items.find(x => x.id === row.dataset.id);
@@ -1783,11 +3051,11 @@ el.pcFeed.addEventListener("click", e => {
   const wasAttn = it.kind === "attention";
   renderPageC(); renderPageAttn();
   if (wasAttn){ attnActive = false; showPage("a"); el.live.textContent = "已批准，轮播恢复"; return; }
-  const again = el.pcFeed.querySelector(`.row[data-id="${CSS.escape(it.id)}"]`);
+  const again = document.querySelector(`.row[data-id="${CSS.escape(it.id)}"]`);
   if (again) again.focus();
   const left = scene.feed.items.filter(x => x.unread).length;
   el.live.textContent = left ? `已标记已读，还剩 ${left} 条未读` : "已全部读完";
-});
+}));
 
 /* ---------- 控制栏 ---------- */
 function syncSegs(){
@@ -1824,6 +3092,47 @@ chk.addEventListener("change", () => { rm = chk.checked ? "1" : "0"; root.datase
    按任意键再请求全屏——提示只出现这一次。
    纯净模式下轮播强制开、忽略 localStorage 里的手动选页；键盘 ack 与指示点保留。
    ========================================================================== */
+/* ---------- 横向压缩补偿 + 画布高度 ---------- */
+const rngPanel = document.getElementById("rngPanel");
+const panelVal = document.getElementById("panelVal");
+const panelFlash = document.getElementById("panelFlash");
+let panelX = parseFloat(LS.get("am.panelx", "")) ||
+  parseFloat(getComputedStyle(root).getPropertyValue("--panel-x")) || 1.19;
+let screenH = parseInt(LS.get("am.screenh", "270"), 10) || 270;
+let flashTimer = 0;
+
+function setPanelX(v, {flash = false} = {}){
+  panelX = Math.min(1.25, Math.max(1, Math.round(v * 100) / 100));
+  /* 画布逻辑宽 = round(480 / panelX)，再由 transform 横向拉回 960 物理宽 */
+  root.style.setProperty("--panel-x", String(panelX));
+  root.style.setProperty("--screen-w", Math.round(480 / panelX) + "px");
+  rngPanel.value = String(panelX);
+  panelVal.textContent = panelX.toFixed(2);
+  LS.set("am.panelx", String(panelX));
+  if (flash){
+    panelFlash.textContent = `panel-x ${panelX.toFixed(2)} · ${Math.round(480 / panelX)}px`;
+    panelFlash.hidden = false;
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => panelFlash.hidden = true, 1000);
+  }
+  if (scene) { renderPageD(); renderPageE(); }
+}
+function setScreenH(h){
+  screenH = h;
+  root.style.setProperty("--screen-h", h + "px");
+  /* E 页标题最多两行 —— 270 的高度里五条等权只放得下一行，320 才够两行 */
+  root.style.setProperty("--e-lines", h >= 300 ? "2" : "1");
+  LS.set("am.screenh", String(h));
+  document.querySelectorAll("#segH button").forEach(b =>
+    b.setAttribute("aria-pressed", String(Number(b.dataset.h) === h)));
+  if (scene) { renderPageD(); renderPageE(); }
+}
+rngPanel.addEventListener("input", () => setPanelX(parseFloat(rngPanel.value)));
+document.getElementById("segH").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  setScreenH(Number(b.dataset.h));
+});
+
 const pureHint = document.getElementById("pureHint");
 let pure = false, rotateBeforePure = rotate;
 
@@ -1859,6 +3168,11 @@ document.addEventListener("keydown", e => {
   if (pureHint.hidden === false){        /* 等手势的那一刻：任意键都算 */
     pureHint.hidden = true;
     requestFs();
+    e.preventDefault();
+    return;
+  }
+  if (pure && (e.key === "[" || e.key === "]")){
+    setPanelX(panelX + (e.key === "]" ? 0.02 : -0.02), {flash:true});
     e.preventDefault();
     return;
   }
@@ -1912,6 +3226,8 @@ document.querySelectorAll(".edge").forEach(n => {
   n.addEventListener("blur", () => n.dataset.hint = "0");
 });
 
+setPanelX(panelX);
+setScreenH(screenH);
 chk.checked = rm === "1";
 chkRotate.checked = rotate;
 root.dataset.rm = rm;

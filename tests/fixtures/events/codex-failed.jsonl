@@ -1,0 +1,5 @@
+{"timestamp":"2026-09-14T11:00:00.000Z","type":"session_meta","payload":{"session_id":"01a08ac3-0000-7e01-8a3a-7b7390a4dd76","cwd":"/private/tmp/sample-workspace"}}
+{"timestamp":"2026-09-14T11:00:01.000Z","type":"event_msg","payload":{"type":"user_message","message":"回复ok\n","images":[]}}
+{"timestamp":"2026-09-14T11:00:02.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"t1","started_at":1789038002}}
+{ this line is not json
+{"timestamp":"2026-09-14T11:00:08.000Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"t1","last_agent_message":null,"error":{"message":"{\"type\":\"error\",\"status\":400}","codex_error_info":"other"},"duration_ms":5876}}

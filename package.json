@@ -9,8 +9,8 @@
     "dev": "electron-vite dev",
     "build": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && electron-vite build",
     "preview": "electron-vite preview",
-    "shoot": "MONITOR_SHOOT=1 electron-vite dev",
-    "selftest": "MONITOR_SELFTEST=1 electron-vite dev",
+    "shoot": "MONITOR_USER_DATA=\"$TMPDIR/agent-monitor-selftest\" MONITOR_CONFIG_FILE=\"$TMPDIR/agent-monitor-selftest/config.json\" MONITOR_HOOK_TOKEN_FILE=\"$TMPDIR/agent-monitor-selftest/hook-token\" MONITOR_HOOK_PORT=47931 MONITOR_SHOOT=1 electron-vite dev",
+    "selftest": "MONITOR_USER_DATA=\"$TMPDIR/agent-monitor-selftest\" MONITOR_CONFIG_FILE=\"$TMPDIR/agent-monitor-selftest/config.json\" MONITOR_HOOK_TOKEN_FILE=\"$TMPDIR/agent-monitor-selftest/hook-token\" MONITOR_HOOK_PORT=47931 MONITOR_SELFTEST=1 electron-vite dev",
     "test": "vitest run"
   },
   "devDependencies": {

@@ -96,12 +96,15 @@ describe('Store · live 模式（M2 真实采集）', () => {
   const win = (usedPercent: number): QuotaWindow[] =>
     [{ label: '5h', usedPercent, resetsAt: '2026-09-14T20:00:00+08:00' }]
 
-  it('默认就是 live：骨架屏起步，三块都还没有窗口，事件仍是 M1 的 fixtures', () => {
+  it('默认就是 live：骨架屏起步，三块都还没有窗口，事件流是空的', () => {
     const s = new Store().get()
     expect(s.loading).toBe(true)
     expect(s.agents.map(a => a.windows.length)).toEqual([0, 0, 0])
     expect(s.agents.every(a => a.notice === undefined)).toBe(true) // 交给渲染层画「等待首轮采样」
-    expect(s.events.length).toBeGreaterThan(0)
+    // M3 起事件也是真的：起步时一条都没有，屏上画「今天还没有完成的任务」。
+    // M2 那会儿这里挂的是 M1 的 fixtures，屏上却没有任何标记（m2 复核 §3.6）。
+    expect(s.events).toEqual([])
+    expect(s.feedNotice).toEqual({ tone: 'empty', code: 'feed_empty' })
   })
 
   it('第一轮落地就退出骨架屏，数字与 plan 都进状态', () => {

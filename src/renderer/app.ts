@@ -21,12 +21,15 @@ import './app.css'
 
 import {
   DEFAULT_CONFIG, ack as pagerAck, create, interruptAttention, interruptEvent,
-  manual, manualPaused, setAuto, showPage as pagerShowPage, step, tick
+  manual, manualPaused, orderFor, setAuto, setOrder, showPage as pagerShowPage, step, tick
 } from './pager.js'
 import type { PagerConfig, PagerState } from './pager.js'
 import type {
-  AgentEvent, AgentId, AgentState, MonitorApi, MonitorState, Notice, NoticeCode, Page, QuotaWindow, SceneName
+  AgentEvent, AgentId, AgentState, MonitorApi, MonitorState, NewsData, Notice, NoticeCode,
+  Page, QuotaWindow, SceneName, UsageData
 } from '../shared/types.js'
+import { scaleFor } from '../shared/scale.js'
+import { newsWhen } from './timefmt.js'
 
 declare global {
   interface Window { monitor: MonitorApi }
@@ -41,14 +44,23 @@ const AGENTS: Record<AgentId, { name: string; tag: string; color: string }> = {
 }
 
 const WIN5H = 5 * 3600 * 1000
-const ROW_BUDGET = 4 // C 页：1 放大 + 3 行
+/** v2：C 拆成 C1 / C2，每页 4 行，共 8 个 session（design/brief-m0-v2.md §1） */
+const PER_PAGE = 4
 
 const KIND_LABEL: Record<string, string> = {
   running: '运行中', failed: '失败', attention: '等待批准', completed: '已完成'
 }
 const FEED_TITLE: Partial<Record<SceneName, string>> = {
-  attention: '需要你', running: '进行中', loading: '事件', empty: '事件', error: '事件'
+  attention: '需要你', running: '进行中', loading: 'session', empty: 'session', error: 'session'
 }
+
+/** 指示点的 aria 名。attn 不在轮播里，不需要名字。 */
+const PAGE_LABEL: Partial<Record<Page, string>> = {
+  a: '总览', b: '额度详情', c1: 'session', c2: '更早的 session', d: '每日用量', e: '今日 AI'
+}
+
+/** 热力图五档。0 档是「这一天没用」，顶档是 --charcoal（与额度填充同色）。 */
+const HEAT_LEVELS = 5
 
 type Copy = { icon: IconName; title: string; why: string }
 
@@ -165,6 +177,8 @@ type OkTile = {
   phase: 'ok'
   status: AgentState['status']
   windows: [QuotaWindow, ...QuotaWindow[]]
+  /** v2 §2 · B 页判语那一格改显示的「当前 5h 窗用得最多的模型」。没采到就缺省，留空。 */
+  topModel?: string
   /** 采集出错但旧数字还在：照常画数字，把「后重置 / 速度判语」那一格换成「数据 N 分钟前」 */
   stale?: { since: string; icon: IconName }
 }
@@ -173,7 +187,14 @@ type NoticeTile = { agent: AgentId; phase: 'msg'; status: AgentState['status']; 
 // 判别字段必须是字面量，写成 'loading' | 'msg' 的话 if/else 链narrow 不下去
 type Tile = OkTile | LoadingTile | NoticeTile
 type Feed = { phase: 'ok' | 'loading' | 'msg'; items: AgentEvent[]; msg?: Msg }
-type Scene = { tiles: Tile[]; feed: Feed }
+type Scene = {
+  tiles: Tile[]
+  feed: Feed
+  usage?: UsageData
+  news?: NewsData
+  usageState: DataState
+  newsState: DataState
+}
 
 const toMsg = (n: Notice, agent?: AgentId): Msg => ({ tone: n.tone, ...copyFor(n.code, agent) })
 
@@ -196,10 +217,29 @@ function toTile(a: AgentState, loading: boolean): Tile {
     phase: 'ok',
     status: a.status,
     windows: [w5, ...rest],
+    ...(a.topModel ? { topModel: a.topModel } : {}),
     ...(a.stale && a.notice
       ? { stale: { since: a.updatedAt, icon: copyFor(a.notice.code, a.id).icon } }
       : {})
   }
+}
+
+/**
+ * D / E 两页的数据是独立来源（codexbar cost 与 AIHOT），与三家额度无关，
+ * 所以它们各有各的五态。scene 模式（调试栏的七态）下跟着场景名走 ——
+ * 原型就是这么演示的，截图对账要对得上。
+ */
+type DataState = 'ok' | 'loading' | 'empty' | 'error' | 'edge'
+
+const SCENE_DATA_STATE: Partial<Record<SceneName, DataState>> = {
+  loading: 'loading', empty: 'empty', error: 'error', edge: 'edge'
+}
+
+function dataStateFor(s: MonitorState, has: boolean, err: boolean): DataState {
+  const forced = SCENE_DATA_STATE[s.scene]
+  if (forced) return forced
+  if (err) return 'error'
+  return has ? 'ok' : 'loading'
 }
 
 function toScene(s: MonitorState): Scene {
@@ -209,7 +249,14 @@ function toScene(s: MonitorState): Scene {
     items: s.events,
     msg: s.feedNotice ? toMsg(s.feedNotice) : undefined
   }
-  return { tiles, feed }
+  return {
+    tiles,
+    feed,
+    usage: s.usage,
+    news: s.news,
+    usageState: dataStateFor(s, !!s.usage?.days.length, !!s.usage?.error),
+    newsState: dataStateFor(s, !!s.news?.items.length, !!s.news?.error)
+  }
 }
 
 /* ---------- DOM ---------- */
@@ -218,10 +265,16 @@ const root = document.documentElement
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T
 
 const el = {
-  paTiles: $('paTiles'), pbBands: $('pbBands'), pcFeed: $('pcFeed'), paAttn: $('paAttn'),
+  paTiles: $('paTiles'), pbBands: $('pbBands'),
+  pc1Feed: $('pc1Feed'), pc2Feed: $('pc2Feed'),
+  pdHeat: $('pdHeat'), peNews: $('peNews'), paAttn: $('paAttn'),
   feedTitle: $('feedTitle'), dots: $('dots'), live: $('live'), meter: $('meter'),
-  unread: $('unread'), holdmark: $('holdmark'), topLoading: $('topLoading')
+  unread: $('unread'), topLoading: $('topLoading'),
+  panelxFlash: $('panelxFlash'), calib: $('calib')
 }
+
+/** 「‖」手动暂停标记。指示点整块重画时它会被重建，所以不能放进上面那张常量表。 */
+let holdmark: HTMLElement | null = null
 
 const params = new URLSearchParams(location.search)
 const DEBUG = params.get('debug') === '1'
@@ -236,7 +289,9 @@ const now = (): number => now0 + (Date.now() - boot)
 /* ---------- 运行时状态 ---------- */
 
 let state: MonitorState | null = null
-let scene: Scene = { tiles: [], feed: { phase: 'loading', items: [] } }
+let scene: Scene = {
+  tiles: [], feed: { phase: 'loading', items: [] }, usageState: 'loading', newsState: 'loading'
+}
 let cfg: PagerConfig = DEFAULT_CONFIG
 let pg: PagerState = create(Date.now())
 let rm = window.matchMedia('(prefers-reduced-motion:reduce)').matches
@@ -327,10 +382,13 @@ function renderPageB(): void {
     } else {
       const w5 = t.windows[0], w7 = t.windows[1]
       const start = new Date(w5.resetsAt).getTime() - WIN5H
+      /* v2 §2 · 判语整句删掉，原位置改显示「当前窗口用得最多的模型名」。
+         「够不够撑到重置」不丢：它由时间带上填充与「现在」游标的落差承担。
+         stale 时仍然让位给「数据 N 分钟前」—— 那一刻更该说的是数字有多旧。 */
       inner = `<div class="b-head">${nameCell}
         <span class="b-verdict"${t.stale
           ? ` data-tone="mute" data-stale="${esc(t.stale.since)}"`
-          : ` data-verdict="${start}" data-used="${w5.usedPercent}" data-status="${t.status}"`}></span>
+          : ` data-model="${esc(t.topModel ?? '')}" data-status="${t.status}"`}></span>
         <span class="b-pc mono">${w5.usedPercent}%</span>
         ${w7 ? `<span class="b-sec mono">${esc(w7.label)} ${w7.usedPercent}%</span>` : ''}
         <span class="b-cd mono" data-cd="${esc(w5.resetsAt)}"></span></div>
@@ -352,10 +410,11 @@ function rowHTML(it: AgentEvent, isLead: boolean, aged: boolean): string {
   const unread = !it.acked
   const icon: IconName = it.kind === 'failed' ? 'alert' : it.kind === 'attention' ? 'ret'
     : it.kind === 'running' ? 'dot' : 'check'
-  const timeAttr = it.kind === 'running'
-    ? `data-elapsed="${esc(it.startedAt ?? it.at)}"` : `data-when="${esc(it.at)}"`
-  const when = it.kind === 'running'
-    ? elapsedFmt(now() - new Date(it.startedAt ?? it.at).getTime()) : whenFmt(it.at, now())
+  /* v2 §1 · 时间一律是「最后更新时间」，running 也是 ——
+     它随新活动推进，所以屏上从「刚刚」开始往后爬，而不是停在开始时刻。 */
+  const lu = it.updatedAt ?? it.at
+  const timeAttr = `data-when="${esc(lu)}"`
+  const when = whenFmt(lu, now())
   const label = `${a.name} · ${KIND_LABEL[it.kind] ?? KIND_LABEL.completed} · ${it.title} · ${when}` +
     (unread ? ' · 未读，按 Enter 标记已读' : '')
   const first = it.kind === 'attention'
@@ -370,29 +429,201 @@ function rowHTML(it: AgentEvent, isLead: boolean, aged: boolean): string {
     `<span class="rmark"></span></button>`
 }
 
+/**
+ * v2 §1 · C 拆成 C1 / C2，每页 4 行，共 8 个 session。
+ * 排序：running 置顶，其余按**最后更新时间**倒序（不是开始时间，也不是完成时间）。
+ * 放大的那一条只在 C1 的首位 —— 它是「最新的一件事」；C2 是溢出页，四行等权。
+ */
+const lastUpdateOf = (it: AgentEvent): string => it.updatedAt ?? it.at
+
+export function sortSessions(items: AgentEvent[]): AgentEvent[] {
+  return [...items].sort((x, y) => {
+    const rx = x.kind === 'running' ? 1 : 0
+    const ry = y.kind === 'running' ? 1 : 0
+    if (rx !== ry) return ry - rx
+    return Date.parse(lastUpdateOf(y)) - Date.parse(lastUpdateOf(x))
+  })
+}
+
+/** C2 有没有行 —— 指示点个数与轮播列表都读它（空则整页跳过） */
+const hasC2 = (): boolean =>
+  scene.feed.phase === 'ok' && sortSessions(scene.feed.items).length > PER_PAGE
+
 function renderPageC(): void {
   const f = scene.feed
-  el.feedTitle.textContent = (state && FEED_TITLE[state.scene]) || '最近完成'
+  el.feedTitle.textContent = (state && FEED_TITLE[state.scene]) || '最近的 session'
   if (f.phase === 'loading') {
-    el.pcFeed.innerHTML = `<div class="feed-skel"><i></i><i></i><i></i>
-      <span class="loading-label" role="status" style="padding:4px 8px 0">读取中</span></div>`
+    el.pc1Feed.innerHTML = `<div class="feed-skel"><i></i><i></i><i></i><i></i>
+      <span class="loading-label sr" role="status">读取中</span></div>`
+    el.pc2Feed.innerHTML = ''
     return
   }
   if (f.phase === 'msg') {
     const m = f.msg!
-    el.pcFeed.innerHTML = `<div class="feed-msg msg" data-tone="${m.tone}">
+    el.pc1Feed.innerHTML = `<div class="feed-msg msg" data-tone="${m.tone}">
       <div class="msg-head">${svg(m.icon, 15)}<span>${esc(m.title)}</span></div>
       <p>${esc(m.why)}</p></div>`
+    el.pc2Feed.innerHTML = ''
     return
   }
-  const shown = f.items.slice(0, ROW_BUDGET)
-  const attn = shown.some(x => x.kind === 'attention' && !x.acked)
+  /* 全套强调只给一条：有 attention 时给它，否则给排序后的第一条未读。
+     顺序不能反 —— 在排序之前打旗标，屏上第一行就不是被强调的那条
+     （designer 的断言抓到过这个）。 */
+  const all = sortSessions(f.items)
+  const attn = all.some(x => x.kind === 'attention' && !x.acked)
   let spent = false
-  el.pcFeed.innerHTML = shown.map((it, i) => {
+  const paint = (list: AgentEvent[], withLead: boolean): string => list.map((it, i) => {
     const full = !spent && (attn ? it.kind === 'attention' : !it.acked)
     if (full) spent = true
-    return rowHTML(it, i === 0, !it.acked && !full)
+    return rowHTML(it, withLead && i === 0, !it.acked && !full)
   }).join('')
+  el.pc1Feed.innerHTML = paint(all.slice(0, PER_PAGE), true)
+  el.pc2Feed.innerHTML = paint(all.slice(PER_PAGE, PER_PAGE * 2), false)
+  tickFeed()
+}
+
+/* ---------- 渲染：D 页 · 每日用量热力图 ---------- */
+
+/**
+ * 数字缩写。热力图的 tooltip 要在 14px 一行里报三家，全写 3 亿会把行撑破。
+ */
+export const fmtNum = (v: number): string =>
+  v >= 1e8 ? (v / 1e8).toFixed(1) + '亿'
+    : v >= 1e4 ? (v / 1e4).toFixed(1) + '万' : String(v)
+
+/** 0 档留给「这一天没用」，其余四档按窗口内最大值均分 */
+export function heatLevel(intensity: number, max: number): number {
+  if (!intensity) return 0
+  const t = max > 0 ? intensity / max : 0
+  return Math.min(HEAT_LEVELS - 1, 1 + Math.floor(t * (HEAT_LEVELS - 1) - 1e-9))
+}
+
+/** 隔行标星期，免得 14px 在 13px 的格距上挤成一片 */
+const DAY_LABEL = ['一', '', '三', '', '五', '', '日']
+
+function renderPageD(): void {
+  const st = scene.usageState
+  if (st !== 'ok' && st !== 'edge') {
+    el.pdHeat.innerHTML = st === 'loading'
+      ? `<div class="feed-skel"><i style="height:20px"></i><i style="height:104px"></i>
+         <span class="loading-label" role="status">读取中</span></div>`
+      : `<div class="feed-msg msg" data-tone="${st === 'error' ? 'error' : 'empty'}">
+         <div class="msg-head">${svg(st === 'error' ? 'radio' : 'inbox', 15)}<span>${
+           st === 'error' ? '用量数据读取失败' : '还没有用量数据'}</span></div>
+         <p>${st === 'error' ? 'codexbar cost 调用超时，30 分钟后重试' : '跑满一天后这里会出现第一格'}</p></div>`
+    return
+  }
+  const usage = scene.usage!
+  const days = usage.days
+  const maxI = days.reduce((m, d) => Math.max(m, d.intensity || 0), 0)
+  /* 列数由画布宽度决定：每列 cell+2px，减去星期标签列与间隙。
+     403 宽（panelX 补偿后）比 480 少放两三列，所以不能写死。 */
+  const cell = 13
+  const avail = el.pdHeat.clientWidth || 387
+  const cols = Math.max(4, Math.min(Math.ceil(days.length / 7),
+    Math.floor((avail - 26 - 8 + 2) / (cell + 2))))
+  const shown = days.slice(-cols * 7)
+  if (!shown.length) { el.pdHeat.innerHTML = ''; return }
+  /* 第一格对齐到周一：JS 的 getDay() 周日是 0 */
+  const firstIdx = (new Date(shown[0]!.date).getDay() + 6) % 7
+  const cellsHtml = Array.from({ length: firstIdx }, () =>
+    '<span class="cell" data-void="1" aria-hidden="true"></span>').join('') +
+    shown.map(d => {
+      const lv = heatLevel(d.intensity, maxI)
+      return `<button type="button" class="cell" data-l="${lv}" data-date="${esc(d.date)}" ` +
+        `tabindex="-1" aria-label="${esc(d.date)} 用量第 ${lv} 档"></button>`
+    }).join('')
+  const weeks = usage.weeks || Math.round(shown.length / 7)
+  el.pdHeat.innerHTML = `
+    <div class="d-head"><span class="d-title">每日用量 · 近 ${weeks} 周</span>
+      <span class="d-legend">${(['codex', 'claude', 'zcode'] as AgentId[]).map(id =>
+        `<span style="--idc:${AGENTS[id].color}"><i></i>${esc(AGENTS[id].tag)}</span>`).join('')}</span></div>
+    <div class="d-grid" style="--cell:${cell}px">
+      <div class="d-days">${DAY_LABEL.map(x => `<span>${x}</span>`).join('')}</div>
+      <div class="d-cells" id="dCells">${cellsHtml}</div>
+    </div>
+    <div class="d-tip" id="dTip"></div>`
+
+  const cells = [...el.pdHeat.querySelectorAll<HTMLElement>('.cell[data-date]')]
+  const byDate = new Map(days.map(d => [d.date, d]))
+  const tip = el.pdHeat.querySelector<HTMLElement>('#dTip')!
+  /* 单位由主进程显式给（usage.units），不靠「哪个键存在」去猜 ——
+     ZCode 走 model_usage 时是 token，退回日志时才是请求数，同一个字段两种含义。 */
+  const units = usage.units
+  const unitWord = (id: AgentId): string => (units[id] === 'requests' ? ' 次' : ' tok')
+  const showTip = (c: HTMLElement): void => {
+    const d = byDate.get(c.dataset.date!)
+    if (!d) return
+    const b = d.byAgent
+    const parts: string[] = []
+    if (b.codex) parts.push(`Codex ${fmtNum(b.codex.tokens || 0)}${unitWord('codex')}`)
+    if (b.claude) parts.push(`Claude ${fmtNum(b.claude.tokens || 0)}${unitWord('claude')}`)
+    if (b.zcode) parts.push(`ZCode ${fmtNum(b.zcode.tokens ?? b.zcode.requests ?? 0)}${unitWord('zcode')}`)
+    tip.innerHTML = `<b>${esc(d.date)}</b><span class="dim">${esc(parts.join(' · '))}</span>` +
+      `<span class="d-scale">${[0, 1, 2, 3, 4].map(l =>
+        `<i style="background:var(--heat-${l})"></i>`).join('')}</span>`
+    cells.forEach(x => { x.tabIndex = x === c ? 0 : -1 })
+  }
+  cells.forEach((c, i) => {
+    c.addEventListener('mouseenter', () => showTip(c))
+    c.addEventListener('focus', () => showTip(c))
+    c.addEventListener('keydown', e => {
+      const d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0
+      if (!d) return
+      const t = cells[i + d]
+      if (t) { t.focus(); e.preventDefault(); e.stopPropagation() }
+    })
+  })
+  const last = cells[cells.length - 1]
+  if (last) { last.tabIndex = 0; showTip(last) }
+}
+
+/* ---------- 渲染：E 页 · 今日 AI 大事（AIHOT） ---------- */
+
+/**
+ * 不打断、不响铃、不计未读。
+ * AIHOT 的返回是外部文本，一律当不可信：只经 esc() 以纯文本渲染，不建链接、不预取。
+ */
+function renderPageE(): void {
+  const st = scene.newsState
+  const items = (scene.news?.items ?? []).slice(0, 5)
+  if (st === 'loading') {
+    el.peNews.innerHTML = `<div class="feed-skel">${'<i style="height:30px"></i>'.repeat(5)}
+      <span class="loading-label" role="status">读取中</span></div>`
+    return
+  }
+  if (st === 'error' && !items.length) {
+    el.peNews.innerHTML = `<div class="feed-msg msg" data-tone="error">
+      <div class="msg-head">${svg('radio', 15)}<span>AIHOT 暂时连不上</span></div>
+      <p>30 分钟后重试，期间显示上一次的结果</p></div>`
+    return
+  }
+  if (!items.length) {
+    el.peNews.innerHTML = `<div class="feed-msg msg" data-tone="empty">
+      <div class="msg-head">${svg('inbox', 15)}<span>今天还没有精选</span></div>
+      <p>AIHOT 的精选是人工策展，空窗期很正常</p></div>`
+    return
+  }
+  /* 断网但有缓存：照常画，更新时间旁边说明它是旧的 —— 缓存比一句错误文案有用 */
+  const updated = scene.news?.updatedAt ?? ''
+  el.peNews.innerHTML = `
+    <div class="e-head"><span class="e-title">今日 AI · AIHOT</span>
+      <span class="e-upd"${st === 'error' ? '' : ` data-when="${esc(updated)}"`}>${
+        st === 'error' ? '连不上 · 显示缓存' : ''}</span></div>
+    <div class="e-list">${items.map((it, i) => `<div class="e-item">
+        <span class="e-no">${i + 1}</span>
+        <span class="e-t">${esc(it.title)}</span>
+        <span class="e-meta"><span class="e-src">${esc(it.source ?? 'AIHOT')}</span>
+          <span class="e-time" data-newswhen="${esc(it.at ?? updated)}"></span></span>
+      </div>`).join('')}</div>
+    <div class="e-foot">数据来源：AIHOT</div>`
+  /* 标题行数由实测行高决定，不按画布高度一刀切：3 条时每条放得下两行，
+     满 5 条时每条只剩 27px，自动退回一行。 */
+  const list = el.peNews.querySelector<HTMLElement>('.e-list')
+  if (list) {
+    const per = (list.clientHeight - 4 * (items.length - 1)) / Math.max(1, items.length)
+    el.peNews.style.setProperty('--e-lines', String(Math.max(1, Math.min(3, Math.floor(per / 19)))))
+  }
   tickFeed()
 }
 
@@ -450,13 +681,16 @@ function tickTiles(): void {
     const pct = Math.max(0, Math.min(100, ((t - Number(n.dataset.caret)) / WIN5H) * 100))
     n.style.left = pct.toFixed(2) + '%'
   })
-  document.querySelectorAll<HTMLElement>('[data-verdict]').forEach(n => {
-    const pct = Math.max(0, Math.min(100, ((t - Number(n.dataset.verdict)) / WIN5H) * 100))
-    const used = Number(n.dataset.used), over = used > pct, st = n.dataset.status
+  /* v2 §2 · 判语整句删掉，原位置改显示当前窗口用得最多的模型名。
+     「够不够撑到重置」不丢：它由时间带上填充与「现在」游标的落差承担，
+     不再用一句话复述 —— 那句话在 14px 上本来也只是被扫过去而不是被读。
+     还没采到 topModel 时整格留空，不写「未知」占位。 */
+  document.querySelectorAll<HTMLElement>('[data-model]').forEach(n => {
+    const st = n.dataset.status
     if (st === 'attention') { n.dataset.tone = 'attn'; n.textContent = '等待你批准'; return }
-    n.dataset.tone = over ? 'over' : 'under'
-    const verdict = over ? '按这个速度会提前用尽' : '按这个速度用不完'
-    n.textContent = st === 'running' ? `运行中 · ${verdict}` : verdict
+    n.dataset.tone = 'model'
+    const m = n.dataset.model ?? ''
+    n.textContent = !m ? '' : st === 'running' ? `运行中 · ${m}` : m
   })
 }
 
@@ -467,6 +701,9 @@ function tickFeed(): void {
   })
   document.querySelectorAll<HTMLElement>('[data-elapsed]').forEach(n => {
     n.textContent = elapsedFmt(t - new Date(n.dataset.elapsed!).getTime())
+  })
+  document.querySelectorAll<HTMLElement>('[data-newswhen]').forEach(n => {
+    n.textContent = newsWhen(n.dataset.newswhen!, t)
   })
   document.querySelectorAll<HTMLElement>('[data-elapsed2]').forEach(n => {
     n.textContent = '已等 ' + elapsedFmt(t - new Date(n.dataset.elapsed2!).getTime())
@@ -490,6 +727,20 @@ function announceThresholds(): void {
 
 /* ---------- 页切换 ---------- */
 
+/**
+ * 指示点。v2 §6：水平居中、贴画布底边（原来在右下角与瓦片边框重合）。
+ * 个数随轮播列表变 —— C2 空时少一个；attention 页不在列表里，那时全部暗着，
+ * 这本身就是「当前不在轮播的六页里」这条状态信息。
+ */
+function renderDots(p: Page): void {
+  const L = pg.order
+  el.dots.innerHTML = '<span class="holdmark" id="holdmark" data-not-accent hidden>&#8214;</span>' +
+    L.map((q, i) => `<button type="button" data-p="${esc(q)}" data-not-accent ` +
+      `data-on="${q === p ? 1 : 0}" aria-label="第 ${i + 1} 页 ${esc(PAGE_LABEL[q] ?? q)}"></button>`).join('')
+  holdmark = document.getElementById('holdmark')
+  if (holdmark) holdmark.hidden = !manualPaused(pg, Date.now())
+}
+
 function applyPage(): void {
   const p = pg.page
   root.dataset.page = p
@@ -500,10 +751,7 @@ function applyPage(): void {
     n.inert = !on
     n.setAttribute('aria-hidden', on ? 'false' : 'true')
   })
-  // attention 页三点全暗，读作「当前不在轮播的三页里」
-  el.dots.querySelectorAll<HTMLElement>('button').forEach(n => {
-    n.dataset.on = n.dataset.p === p ? '1' : '0'
-  })
+  renderDots(p)
   lastPage = p
   syncTopbar()
   syncSegPage()
@@ -526,7 +774,7 @@ function syncTopbar(): void {
 
 function updateMeter(): void {
   // ‖ 每 100ms 刷一次，到期自己消失 —— 只在切页时刷会让它停在屏上
-  el.holdmark.hidden = !manualPaused(pg, Date.now())
+  if (holdmark) holdmark.hidden = !manualPaused(pg, Date.now())
   if (!DEBUG) return
   const left = Math.max(0, pg.dwellUntil - Date.now()) / 1000
   const leftTxt = left >= 10 ? String(Math.ceil(left)) : left.toFixed(1)
@@ -535,7 +783,7 @@ function updateMeter(): void {
     : held > 0 ? `${pg.page.toUpperCase()} · 手动暂停 ${Math.ceil(held)}s`
       : !pg.auto ? '轮播关闭'
         : pg.page === 'attn' ? 'attention'
-          : `${pg.page.toUpperCase()}${pg.eventHold && pg.page === 'c' ? ' · 新事件钉住' : ''} · ${leftTxt}s`
+          : `${pg.page.toUpperCase()}${pg.eventHold && pg.page === 'c1' ? ' · 新事件钉住' : ''} · ${leftTxt}s`
 }
 
 /* ---------- 提示音 ---------- */
@@ -559,6 +807,39 @@ function chime(): void {
   } catch { /* 没有音频设备也不该让面板停下来 */ }
 }
 
+/* ---------- 画布尺寸与横向压缩补偿 ---------- */
+
+/**
+ * 画布尺寸由主进程给（目标显示器 bounds / 2）：960×540 @2x → 480×270，
+ * 960×640 @1x（面板的 EDID 原生 3:2 模式）→ 480×320。
+ * panelX 的换算在 shared/scale.ts —— 主进程与这里必须用同一份算术。
+ */
+let panelXShown = 0
+function applyCanvas(canvas: { width: number; height: number }, panelX: number): void {
+  const { w, h, sx, sy } = scaleFor(canvas, panelX)
+  root.style.setProperty('--canvas-w', `${w}px`)
+  root.style.setProperty('--canvas-h', `${h}px`)
+  root.style.setProperty('--scale-x', String(sx))
+  root.style.setProperty('--scale-y', String(sy))
+  panelXShown = panelX
+}
+
+/** ⌃⌥] / ⌃⌥[ / ⌃⌥0 之后右上角闪 1 s。不写进 aria-live —— 它是给眼睛的即时反馈。 */
+let flashTimer: ReturnType<typeof setTimeout> | null = null
+function flashPanelX(value: number): void {
+  el.panelxFlash.textContent = value.toFixed(2)
+  el.panelxFlash.dataset.on = '1'
+  if (flashTimer) clearTimeout(flashTimer)
+  flashTimer = setTimeout(() => { delete el.panelxFlash.dataset.on }, 1000)
+}
+
+function toggleCalibration(): void {
+  const on = el.calib.dataset.on === '1'
+  if (on) delete el.calib.dataset.on
+  else el.calib.dataset.on = '1'
+  el.live.textContent = on ? '校准叠层已关闭' : `校准叠层已打开，当前补偿 ${panelXShown.toFixed(2)}`
+}
+
 /* ---------- 状态进来 ---------- */
 
 const motionOn = (): boolean => !rm
@@ -570,10 +851,7 @@ function onState(next: MonitorState): void {
   scene = toScene(next)
   root.dataset.state = next.scene
 
-  // 画布尺寸由主进程给（目标显示器 bounds / 2）：960×540 @2x → 480×270，
-  // 960×640 @1x（面板的 EDID 原生 3:2 模式）→ 480×320。zoom 仍是 2，不写死尺寸。
-  root.style.setProperty('--canvas-w', `${next.canvas.width}px`)
-  root.style.setProperty('--canvas-h', `${next.canvas.height}px`)
+  applyCanvas(next.canvas, next.panelX)
 
   const isFirst = firstState
   if (firstState) {
@@ -595,23 +873,25 @@ function onState(next: MonitorState): void {
   state0 = next.scene
   knownIds = new Set(next.events.map(e => e.id))
 
-  // FLIP：新行从顶部推入，其余行跟着往下走
+  // FLIP：新行从顶部推入，其余行跟着往下走。C1 / C2 两块都要量 ——
+  // 一条新 session 会把 C1 的第 4 行挤到 C2 的首位，只量 C1 那条行会凭空闪现。
   const anim = motionOn() && !!fresh
   const before = new Map<string, number>()
   if (anim) {
-    el.pcFeed.querySelectorAll<HTMLElement>('.row').forEach(r => {
-      before.set(r.dataset.id!, r.getBoundingClientRect().top)
-    })
+    feedRows().forEach(r => { before.set(r.dataset.id!, r.getBoundingClientRect().top) })
   }
 
-  renderPageA(); renderPageB(); renderPageC(); renderPageAttn()
+  renderPageA(); renderPageB(); renderPageC(); renderPageD(); renderPageE(); renderPageAttn()
   tickTiles(); tickFeed(); tickClocks()
+  // C2 可能刚空掉 / 刚有行：轮播列表与指示点个数跟着变
+  pg = setOrder(pg, orderFor(hasC2()), nowMs, cfg)
 
   /* ack 走的是 IPC 往返，回来时 renderPageC 整块 innerHTML 重写，行元素必然被销毁重建，
      焦点于是掉到 <body>，键盘用户每标记一条已读就要从头 Tab（原型里有 again.focus()，
      移植时掉了）。把焦点还给同一条 data-id。 */
   if (refocusRowId) {
-    const again = el.pcFeed.querySelector<HTMLElement>(`.row[data-id="${CSS.escape(refocusRowId)}"]`)
+    const sel = `.row[data-id="${CSS.escape(refocusRowId)}"]`
+    const again = el.pc1Feed.querySelector<HTMLElement>(sel) ?? el.pc2Feed.querySelector<HTMLElement>(sel)
     refocusRowId = null
     again?.focus()
   }
@@ -619,7 +899,7 @@ function onState(next: MonitorState): void {
   if (next.loading) el.live.textContent = '正在读取三个 agent 的额度与事件'
 
   if (anim) {
-    el.pcFeed.querySelectorAll<HTMLElement>('.row').forEach(r => {
+    feedRows().forEach(r => {
       const prev = before.get(r.dataset.id!)
       if (prev == null) { r.classList.add('enter'); return }
       const d = prev - r.getBoundingClientRect().top
@@ -655,7 +935,13 @@ function onState(next: MonitorState): void {
 
 /* ---------- ack ---------- */
 
-el.pcFeed.addEventListener('click', e => {
+/** C1 + C2 的全部行。FLIP 与 ack 都要把两页当成一个列表看。 */
+const feedRows = (): HTMLElement[] => [
+  ...el.pc1Feed.querySelectorAll<HTMLElement>('.row'),
+  ...el.pc2Feed.querySelectorAll<HTMLElement>('.row')
+]
+
+const onFeedClick = (e: Event): void => {
   const row = (e.target as HTMLElement).closest<HTMLElement>('.row')
   if (!row) return
   const it = scene.feed.items.find(x => x.id === row.dataset.id)
@@ -666,7 +952,9 @@ el.pcFeed.addEventListener('click', e => {
   const left = scene.feed.items.filter(x => !x.acked).length - 1
   el.live.textContent = it.kind === 'attention' ? '已批准，轮播恢复'
     : left ? `已标记已读，还剩 ${left} 条未读` : '已全部读完'
-})
+}
+el.pc1Feed.addEventListener('click', onFeedClick)
+el.pc2Feed.addEventListener('click', onFeedClick)
 
 /* ---------- 手动切换：键盘 / 指示点 / 边缘热区 ---------- */
 
@@ -768,6 +1056,16 @@ window.monitor.onCommand(cmd => {
   if (cmd.type === 'step') pg = step(pg, cmd.dir, nowMs, cfg)
   else if (cmd.type === 'home') pg = manual(pg, 'a', nowMs, cfg)
   else if (cmd.type === 'showPage') pg = pagerShowPage(pg, cmd.page, nowMs, cfg)
+  else if (cmd.type === 'panelX') {
+    // 值已经由主进程夹紧并写回配置，这里只负责换算与闪显；状态里的 panelX 随后也会推来。
+    // 首帧之前也可能按到（快捷键是全局的），那时按默认画布算，下一帧 onState 会纠正。
+    applyCanvas(state?.canvas ?? { width: 480, height: 270 }, cmd.value)
+    flashPanelX(cmd.value)
+    return
+  } else if (cmd.type === 'calibrate') {
+    toggleCalibration()
+    return
+  }
   applyPage()
   if (cmd.type === 'showPage') {
     // 截图脚本等的就是这一声：两帧之后版面才真的落定。

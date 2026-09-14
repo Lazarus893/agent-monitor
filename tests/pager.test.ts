@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   ack, create, DEFAULT_CONFIG, interruptAttention, interruptEvent, manual,
-  manualPaused, setAuto, showPage, step, tick
+  manualPaused, ORDER_ALL, orderFor, setAuto, setOrder, showPage, step, tick
 } from '../src/renderer/pager.js'
 import type { PagerConfig, PagerState } from '../src/renderer/pager.js'
 
@@ -12,12 +12,41 @@ const T0 = 1_000_000
 const at = (s: PagerState, ms: number): PagerState => tick(s, ms, CFG)
 
 describe('节奏默认值', () => {
-  it('三页 dwell 与新事件钉住都是 60s，手动暂停 120s（tokens.css §14）', () => {
+  it('六页 dwell 与新事件钉住都是 60s，手动暂停 120s（tokens.css §14）', () => {
     expect(DEFAULT_CONFIG.dwellA).toBe(60_000)
     expect(DEFAULT_CONFIG.dwellB).toBe(60_000)
     expect(DEFAULT_CONFIG.dwellC).toBe(60_000)
     expect(DEFAULT_CONFIG.dwellEvent).toBe(60_000)
     expect(DEFAULT_CONFIG.manualHold).toBe(120_000)
+  })
+})
+
+describe('页序（v2 六页）', () => {
+  it('全序是 A → B → C1 → C2 → D → E', () => {
+    expect(ORDER_ALL).toEqual(['a', 'b', 'c1', 'c2', 'd', 'e'])
+  })
+
+  it('C2 空时它不在轮播里 —— 它是 C1 的溢出页，空的就是一页空白', () => {
+    expect(orderFor(false)).toEqual(['a', 'b', 'c1', 'd', 'e'])
+    expect(orderFor(true)).toEqual(ORDER_ALL)
+  })
+
+  it('setOrder：列表没变就原样返回（每帧都会调，不该每帧都造新对象）', () => {
+    const s = create(T0, {}, CFG)
+    expect(setOrder(s, orderFor(false), T0, CFG)).toBe(s)
+  })
+
+  it('停在 C2 时它突然变空 → 落回 C1，而不是留在一页不存在的空白上', () => {
+    let s = setOrder(create(T0, {}, CFG), orderFor(true), T0, CFG)
+    s = manual(s, 'c2', T0, CFG)
+    s = setOrder(s, orderFor(false), T0 + 1_000, CFG)
+    expect(s.page).toBe('c1')
+  })
+
+  it('停在别的页时 C2 变空不动页码', () => {
+    let s = setOrder(create(T0, {}, CFG), orderFor(true), T0, CFG)
+    s = manual(s, 'd', T0, CFG)
+    expect(setOrder(s, orderFor(false), T0 + 1_000, CFG).page).toBe('d')
   })
 })
 
@@ -27,12 +56,24 @@ describe('定时轮播', () => {
     expect(at(s, T0 + 59_999).page).toBe('a')
   })
 
-  it('A → B → C → A，每页停满一个 dwell', () => {
+  it('C2 空时：A → B → C1 → D → E → A，每页停满一个 dwell', () => {
     let s = create(T0, {}, CFG)
     s = at(s, T0 + 60_000); expect(s.page).toBe('b')
     s = at(s, T0 + 119_999); expect(s.page).toBe('b')
-    s = at(s, T0 + 120_000); expect(s.page).toBe('c')
-    s = at(s, T0 + 180_000); expect(s.page).toBe('a')
+    s = at(s, T0 + 120_000); expect(s.page).toBe('c1')
+    s = at(s, T0 + 180_000); expect(s.page).toBe('d')
+    s = at(s, T0 + 240_000); expect(s.page).toBe('e')
+    s = at(s, T0 + 300_000); expect(s.page).toBe('a')
+  })
+
+  it('C2 非空时它排在 C1 之后', () => {
+    let s = setOrder(create(T0, {}, CFG), orderFor(true), T0, CFG)
+    s = at(s, T0 + 60_000); expect(s.page).toBe('b')
+    s = at(s, T0 + 120_000); expect(s.page).toBe('c1')
+    s = at(s, T0 + 180_000); expect(s.page).toBe('c2')
+    s = at(s, T0 + 240_000); expect(s.page).toBe('d')
+    s = at(s, T0 + 300_000); expect(s.page).toBe('e')
+    s = at(s, T0 + 360_000); expect(s.page).toBe('a')
   })
 
   it('轮播关闭后不推进，重新打开从当前页重新计时而不是立刻翻页', () => {
@@ -47,37 +88,37 @@ describe('定时轮播', () => {
 })
 
 describe('打断 2 · 新事件', () => {
-  it('立刻跳 C 并停满 dwellEvent', () => {
+  it('立刻跳 C1 并停满 dwellEvent（v2 把 C 拆开之后，钉住的是 C1）', () => {
     let s = create(T0, {}, CFG)
     s = interruptEvent(s, T0 + 5_000, CFG)
-    expect(s.page).toBe('c')
+    expect(s.page).toBe('c1')
     expect(s.eventHold).toBe(true)
-    expect(at(s, T0 + 64_999).page).toBe('c')
-    expect(at(s, T0 + 65_000).page).toBe('a')
+    expect(at(s, T0 + 64_999).page).toBe('c1')
+    expect(at(s, T0 + 65_000).page).toBe('d')
   })
 
   it('期间再来一条重新计时（否则第一条只露几秒）', () => {
     let s = create(T0, {}, CFG)
     s = interruptEvent(s, T0 + 5_000, CFG)
     s = interruptEvent(s, T0 + 40_000, CFG)   // 第二条
-    expect(at(s, T0 + 99_999).page).toBe('c')
-    expect(at(s, T0 + 100_000).page).toBe('a')
+    expect(at(s, T0 + 99_999).page).toBe('c1')
+    expect(at(s, T0 + 100_000).page).toBe('d')
   })
 
-  it('钉住到期后 eventHold 解除，C 页回到普通 dwell', () => {
+  it('钉住到期后 eventHold 解除，C1 回到普通 dwell', () => {
     let s = create(T0, {}, CFG)
     s = interruptEvent(s, T0, CFG)
     s = at(s, T0 + 60_000)
-    expect(s.page).toBe('a')
+    expect(s.page).toBe('d')
     expect(s.eventHold).toBe(false)
   })
 
-  it('新事件盖过手动暂停：手动切到 B 之后来事件，仍跳 C', () => {
+  it('新事件盖过手动暂停：手动切到 B 之后来事件，仍跳 C1', () => {
     let s = create(T0, {}, CFG)
     s = manual(s, 'b', T0 + 1_000, CFG)
     expect(manualPaused(s, T0 + 2_000)).toBe(true)
     s = interruptEvent(s, T0 + 2_000, CFG)
-    expect(s.page).toBe('c')
+    expect(s.page).toBe('c1')
     expect(manualPaused(s, T0 + 2_000)).toBe(false)
   })
 })
@@ -120,26 +161,33 @@ describe('打断 1 · attention', () => {
 describe('手动切换', () => {
   it('手动切页后暂停 120s，期间不自动翻页', () => {
     let s = create(T0, {}, CFG)
-    s = manual(s, 'c', T0 + 1_000, CFG)
-    expect(s.page).toBe('c')
-    expect(at(s, T0 + 120_000).page).toBe('c')   // 暂停未到期
+    s = manual(s, 'c1', T0 + 1_000, CFG)
+    expect(s.page).toBe('c1')
+    expect(at(s, T0 + 120_000).page).toBe('c1')   // 暂停未到期
     expect(manualPaused(s, T0 + 120_999)).toBe(true)
   })
 
   it('120s 无操作后从当前页继续轮播', () => {
     let s = create(T0, {}, CFG)
-    s = manual(s, 'c', T0, CFG)
+    s = manual(s, 'c1', T0, CFG)
     expect(manualPaused(s, T0 + 120_001)).toBe(false)
     s = at(s, T0 + 120_001)
-    expect(s.page).toBe('a')                     // c 的下一页
+    expect(s.page).toBe('d')                     // c1 的下一页（C2 空）
   })
 
-  it('← / → 在 a/b/c 之间环形走，不会走进 attn 页', () => {
-    let s = create(T0, {}, CFG)
-    s = step(s, -1, T0, CFG); expect(s.page).toBe('c')
-    s = step(s, -1, T0, CFG); expect(s.page).toBe('b')
-    s = step(s, 1, T0, CFG); expect(s.page).toBe('c')
+  it('← / → 在轮播列表里环形走，不会走进 attn 页', () => {
+    let s = create(T0, {}, CFG)           // C2 空 → a b c1 d e
+    s = step(s, -1, T0, CFG); expect(s.page).toBe('e')
+    s = step(s, -1, T0, CFG); expect(s.page).toBe('d')
+    s = step(s, 1, T0, CFG); expect(s.page).toBe('e')
     s = step(s, 1, T0, CFG); expect(s.page).toBe('a')
+  })
+
+  it('← / → 跳过空的 C2', () => {
+    let s = manual(create(T0, {}, CFG), 'c1', T0, CFG)
+    expect(step(s, 1, T0, CFG).page).toBe('d')
+    s = setOrder(manual(create(T0, {}, CFG), 'c1', T0, CFG), orderFor(true), T0, CFG)
+    expect(step(s, 1, T0, CFG).page).toBe('c2')
   })
 
   it('手动切走会解除新事件的钉住（人已经自己选了要看哪页）', () => {
@@ -154,15 +202,15 @@ describe('手动切换', () => {
 describe('showPage（截图脚本用）', () => {
   it('直接定页，不触发手动暂停', () => {
     let s = create(T0, {}, CFG)
-    s = showPage(s, 'c', T0 + 1_000, CFG)
-    expect(s.page).toBe('c')
+    s = showPage(s, 'c1', T0 + 1_000, CFG)
+    expect(s.page).toBe('c1')
     expect(manualPaused(s, T0 + 1_000)).toBe(false)
   })
 
-  it('清掉 eventHold：定到 C 页按 dwellC 计时，不按 dwellEvent', () => {
+  it('清掉 eventHold：定到 C1 按 dwellC 计时，不按 dwellEvent', () => {
     let s = create(T0, {}, CFG)
     s = interruptEvent(s, T0, CFG)
-    s = showPage(s, 'c', T0 + 1_000, CFG)
+    s = showPage(s, 'c1', T0 + 1_000, CFG)
     expect(s.eventHold).toBe(false)
     expect(s.dwellUntil).toBe(T0 + 1_000 + CFG.dwellC)
   })
@@ -199,13 +247,13 @@ describe('纯度', () => {
     const run = (): PagerState => {
       let s = create(T0, {}, CFG)
       s = at(s, T0 + 60_000)
-      s = manual(s, 'c', T0 + 61_000, CFG)
+      s = manual(s, 'c1', T0 + 61_000, CFG)
       s = interruptEvent(s, T0 + 62_000, CFG)
       s = interruptAttention(s, T0 + 63_000)
       return ack(s, T0 + 64_000, CFG)
     }
     expect(Object.keys(create(T0, {}, CFG)).sort())
-      .toEqual(['attention', 'auto', 'dwellUntil', 'eventHold', 'holdUntil', 'page'])
+      .toEqual(['attention', 'auto', 'dwellUntil', 'eventHold', 'holdUntil', 'order', 'page'])
     expect(run()).toEqual(run())
   })
 })

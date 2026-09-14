@@ -1,17 +1,17 @@
 /* ==========================================================================
-   画布样式 —— 逐行取自 design/variations.html 的第三个 <style> 块（STAGE 段）。
-   只有三处改动，都因为「浏览器里的一块 stage」变成了「一整块屏」：
+   画布样式 —— 逐行取自 design/variations.html 第三个 <style> 块（STAGE 段）的 v2 版。
+   design/tokens.css 仍是唯一样式真源：app.ts 直接 import 它，这里一个 token 都不抄。
+   只有四处改动，都因为「浏览器里的一块 stage」变成了「一整块屏」：
      1. .stage 去掉 border-radius / box-shadow —— 原型用它们把画布从灰底上框出来，
         副屏上没有底，框线就成了一圈杂边。
-     2. body 直接是 --canvas，无 padding —— 窗口 bounds 就是 960×540，
-        画布 480×270 靠 zoom: 2 铺满，主进程不再另设 zoomFactor（避免双重缩放）。
+     2. body 直接是 --canvas，无 padding —— 窗口 bounds 就是整块屏。
      3. 末尾追加 .harness 调试栏：?debug=1 才显示，position:fixed 浮在画布之上，
         不进 .stage，因此不改变任何画布内的布局与间距栅格。
-     4. .stage 的尺寸改成 --canvas-w / --canvas-h（回落到 tokens 的 --screen-w/h）。
-        这块面板的原生像素是 960×640，当前 960×540 @2x 是缩放器压出来的；
-        用户切到原生模式后画布就是 480×320。四页的主体都是 flex:1 / grid 1fr，
-        多出来的 50px 自动落到 A 页瓦片高度、B 页三条带与 C 页的行区，不会溢出。
-   token 真源仍是 design/tokens.css，由 app.ts 直接 import，不在这里抄。
+     4. .stage 的尺寸与倍率来自 --canvas-w/h 与 --scale-x/y（由主进程的 canvas + panelX 算出），
+        而不是原型里的 --screen-w/h 与 --panel-x 滑块：画布尺寸在这里是显示器给的，
+        不是用户在控制栏里选的。回落值仍是 tokens 的 --screen-w/h 与 --screen-zoom。
+   六页（A/B/C1/C2/D/E）的主体都是 flex:1 / grid 1fr，480×270 / 480×320 / 403×270
+   三种画布下多出来或少掉的空间自动落到各页的主体区，不溢出。
    ========================================================================== */
 
 *{box-sizing:border-box}
@@ -19,10 +19,43 @@ html,body{height:100%}
 body{margin:0;background:var(--canvas);overflow:hidden;
   display:flex;align-items:center;justify-content:center}
 
-.stage{width:var(--canvas-w,var(--screen-w));height:var(--canvas-h,var(--screen-h));zoom:var(--screen-zoom);
+/* 横向压缩补偿（M3 附加节）。
+   副屏 EDID 原生 960×640，用户在 960×540 @2x 下使用，面板的缩放器把画面横向压掉
+   15.6%。这是显示器内部的形变，系统看不见，只能由我们把它拉回去：
+   画布逻辑宽度缩成 round(480 / panelX)，stage 横向再乘 960 / canvasW 拉满整屏。
+   于是屏上 1 CSS px 宽 = 1 CSS px 高，版面高度栅格一格没动。
+   zoom 换成 transform：zoom 只能各向同性，而这里两个方向的倍率本来就不一样。
+   transform 不影响 .stage 自身的布局盒，body 的 flex 居中照常生效。 */
+.stage{width:var(--canvas-w,var(--screen-w));height:var(--canvas-h,var(--screen-h));
+  transform:scale(var(--scale-x,var(--screen-zoom)),var(--scale-y,var(--screen-zoom)));
+  transform-origin:center center;
   background:var(--canvas);position:relative;overflow:hidden;
   font-family:var(--font-sans);font-feature-settings:var(--font-features);
   color:var(--body);-webkit-font-smoothing:antialiased}
+
+/* ---- panelX 的两件配套 UI ---- */
+
+/* ⌃⌥] / ⌃⌥[ / ⌃⌥0 之后右上角闪显 1 s 当前值。它不是常驻控件，也不是 accent。 */
+.panelx-flash{position:absolute;top:var(--pad-screen);right:var(--pad-screen);z-index:5;
+  font-family:var(--font-num);font-feature-settings:var(--num-features);
+  font-variant-numeric:tabular-nums;font-size:var(--fs-min);color:var(--mute);
+  background:var(--surface);border:1px solid var(--hairline);border-radius:var(--r-xs);
+  padding:2px 6px;line-height:1;opacity:0;pointer-events:none;
+  transition:opacity var(--dur-state) var(--ease-standard)}
+.panelx-flash[data-on="1"]{opacity:1}
+
+/* ⌃⌥C 的校准叠层：一个 200px 正圆 + 十字线。
+   它画在 stage 内部，所以先被我们横向拉伸、再被面板横向压回去 ——
+   两者抵消时用户看到的才是正圆，这正是要调的那个系数。
+   线用 --ash（tokens 里明写「非信息性标记」），不占 accent 名额。 */
+.calib{position:absolute;inset:0;z-index:6;display:none;place-items:center;pointer-events:none}
+.calib[data-on="1"]{display:grid}
+.calib .ring{width:200px;height:200px;border:1px solid var(--ash);border-radius:var(--r-full)}
+.calib .cross-h,.calib .cross-v{position:absolute;background:var(--ash)}
+.calib .cross-h{left:0;right:0;height:1px;top:50%}
+.calib .cross-v{top:0;bottom:0;width:1px;left:50%}
+.calib .hint{position:absolute;bottom:var(--pad-screen);left:50%;transform:translateX(-50%);
+  font-size:var(--fs-min);color:var(--mute);white-space:nowrap}
 
 /* ==========================================================================
    STAGE —— 画布坐标 480×270
@@ -50,16 +83,20 @@ body{margin:0;background:var(--canvas);overflow:hidden;
 
 /* ---- 页容器：横向滑动切页 ---- */
 .pages{flex:1;min-height:0;margin-top:var(--gap-block);position:relative;overflow:hidden}
-.page{position:absolute;inset:0;padding-bottom:12px;display:flex;flex-direction:column;
+/* 底部 24px 是指示点的地盘，再留 8px 让 C 页最后一行不贴上去（v2 第 6 条） */
+.page{position:absolute;inset:0;padding-bottom:32px;display:flex;flex-direction:column;
   opacity:0;pointer-events:none;transform:translateX(-24px);
   transition:opacity var(--dur-page) var(--ease-standard),transform var(--dur-page) var(--ease-standard)}
 .page[data-on="1"]{opacity:1;pointer-events:auto;transform:none}
 
-/* ---- 页指示：右下角三点。简报明确写了这不算 accent ---- */
-.dots{position:absolute;right:0;bottom:0;display:flex;align-items:center;z-index:3}
-/* 视觉仍是 4px 点，热区放大到 24×24：点本身用伪元素画，button 只负责命中 */
-.dots button{appearance:none;border:0;background:transparent;padding:0;cursor:pointer;
-  width:24px;height:24px;display:grid;place-items:center}
+/* ---- 页指示：水平居中、贴画布底边（v2 第 6 条：原来贴右下角，与瓦片边框重合）。
+   简报明确写了这不算 accent ---- */
+.dots{position:absolute;left:50%;transform:translateX(-50%);bottom:0;height:24px;
+  display:flex;align-items:center;z-index:3}
+/* 视觉仍是 4px 点、热区仍是 24×24：点靠 place-items:end 压到按钮底部，
+   于是「点离画布底 6px」与「热区 24×24 不被裁切」两条可以同时成立 */
+.dots button{appearance:none;border:0;background:transparent;padding:0 0 6px;cursor:pointer;
+  width:24px;height:24px;display:grid;place-items:end center}
 .dots button::after{content:"";width:4px;height:4px;border-radius:var(--r-full);background:var(--ash);
   transition:background var(--dur-state) var(--ease-standard)}
 .dots button[data-on="1"]::after{background:var(--ink)}
@@ -122,8 +159,7 @@ body{margin:0;background:var(--canvas);overflow:hidden;
 .msg-head svg{flex:none;color:var(--mute)}
 .msg[data-tone="error"] .msg-head svg{color:var(--danger)}
 .msg p{margin:0;font-size:var(--fs-min);line-height:1.35;color:var(--mute);
-  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;
-  overflow-wrap:anywhere}
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .skel{display:flex;flex-direction:column;gap:var(--sp-sm);flex:1;justify-content:center}
 .skel i{display:block;background:var(--stone);border-radius:var(--r-xs)}
 .loading-label{font-size:var(--fs-min);letter-spacing:var(--tr-small);color:var(--mute);font-weight:var(--w-emph)}
@@ -173,8 +209,6 @@ body{margin:0;background:var(--canvas);overflow:hidden;
 .page-b .b-name span.t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .page-b .b-verdict{font-size:var(--fs-min);color:var(--mute);flex:1;min-width:0;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.2}
-.page-b .b-verdict[data-tone="mute"]{color:var(--mute)}
-.page-b .b-verdict[data-tone="over"]{color:var(--quota-warn)}
 .page-b .b-verdict[data-tone="error"]{color:var(--danger)}
 .page-b .b-verdict[data-tone="attn"]{color:var(--ink);font-weight:var(--w-read)}
 .page-b .b-pc{font-size:var(--fs-num-b);font-weight:var(--w-emph);color:var(--ink);flex:none}
@@ -211,10 +245,10 @@ body{margin:0;background:var(--canvas);overflow:hidden;
   background:transparent;border:1px solid transparent;border-radius:var(--r-sm);
   color:inherit;font:inherit;cursor:pointer;flex:none;position:relative;
   display:grid;align-items:center;column-gap:var(--sp-sm);padding:0 var(--sp-sm);
-  grid-template-columns:64px minmax(0,1fr) 68px 14px var(--dot);height:46px;
+  grid-template-columns:64px minmax(0,1fr) 88px 14px var(--dot);height:44px;
   transition:background var(--dur-state) var(--ease-standard),border-color var(--dur-state) var(--ease-standard)}
 
-.row.lead{height:56px}
+.row.lead{height:52px}
 .row.lead .rtitle{font-size:var(--fs-lead-r);font-weight:var(--w-emph);color:var(--ink);line-height:1.15}
 .chip{font-size:var(--fs-min);font-weight:var(--w-emph);letter-spacing:var(--tr-caps);
   text-transform:uppercase;color:var(--idc);white-space:nowrap;line-height:1.2}
@@ -222,9 +256,11 @@ body{margin:0;background:var(--canvas);overflow:hidden;
   font-weight:var(--w-emph);letter-spacing:var(--tr-small);color:var(--ink);white-space:nowrap;line-height:1}
 .rtitle{font-size:var(--fs-body-r);line-height:1.2;color:var(--body);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+/* 88px 是「9/13 10:36」在 14px IBM Plex Mono 下的实际宽度（10 字符 × 8.4 ≈ 84）。
+   加 overflow:hidden 兜底：真实数据里出现更长的时间串时截断，而不是压到图标上。 */
 .rtime{font-family:var(--font-num);font-feature-settings:var(--num-features);
   font-variant-numeric:tabular-nums;font-size:var(--fs-min);color:var(--mute);
-  white-space:nowrap;text-align:right;line-height:1}
+  white-space:nowrap;text-align:right;line-height:1;min-width:0;overflow:hidden}
 .rkind{display:inline-flex;align-items:center;justify-content:center;color:var(--mute)}
 .rkind[data-kind="failed"]{color:var(--danger)}
 .rkind[data-kind="running"]{color:var(--idc);animation:pulse var(--cycle-pulse) var(--ease-standard) infinite}
@@ -250,8 +286,75 @@ body{margin:0;background:var(--canvas);overflow:hidden;
 @keyframes enter{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
 .feed-msg{flex:1;display:flex;flex-direction:column;justify-content:center;gap:var(--sp-xs);padding:0 var(--sp-sm)}
 .feed-skel{flex:1;display:flex;flex-direction:column;gap:var(--sp-xs)}
-.feed-skel i{display:block;height:46px;background:var(--stone);border-radius:var(--r-sm);flex:none}
-.feed-skel i:first-child{height:56px}
+.feed-skel i{display:block;height:44px;background:var(--stone);border-radius:var(--r-sm);flex:none}
+.feed-skel i:first-child{height:52px}
+
+/* ==========================================================================
+   D 页 · 每日用量热力图
+   配色决定：不用 GitHub 的绿，也不用 --accent-blue —— 蓝会和 ZCode 的身份色
+   #6f93e6 混淆。改用系统里已经在承担「数据」职责的那条中性阶：0 档是
+   --surface-elevated，1–4 档沿 --charcoal 方向的中性明度阶。同一色相（中性）、
+   无渐变，且顶档就是 --charcoal，与额度填充 --quota-fill 同色，含义一致：
+   「这是数据，不是强调」。格子不按 agent 分色，只按总量分档。
+   ========================================================================== */
+.page-d .dwrap{flex:1;display:flex;flex-direction:column;gap:var(--sp-sm);min-height:0}
+.page-d .d-head{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-sm);flex:none;height:20px}
+.page-d .d-title{font-size:var(--fs-body-r);font-weight:var(--w-emph);color:var(--ink);
+  white-space:nowrap;line-height:1}
+.page-d .d-legend{display:flex;align-items:center;gap:var(--sp-md);
+  font-size:var(--fs-min);color:var(--mute);line-height:1}
+.page-d .d-legend span{display:inline-flex;align-items:center;gap:var(--sp-xs);white-space:nowrap}
+.page-d .d-legend i{width:var(--dot);height:var(--dot);border-radius:var(--r-full);background:var(--idc)}
+/* 数据只有 8 周时格子占不满 464px。左对齐会读成「右边那片是不是没加载出来」，
+   所以整块居中——列数少是数据的事实，不该让版面看起来像坏了。 */
+.page-d .d-grid{display:flex;gap:var(--sp-sm);flex:1;min-height:0;
+  align-items:center;justify-content:center}
+.page-d .d-days{display:grid;grid-auto-rows:var(--cell);row-gap:2px;flex:none;width:26px;
+  font-size:var(--fs-min);color:var(--mute)}
+.page-d .d-days span{line-height:var(--cell)}
+.page-d .d-cells{display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,var(--cell));gap:2px;flex:none}
+.page-d .cell{width:var(--cell);height:var(--cell);border-radius:2px;border:0;padding:0;
+  background:var(--heat-0);cursor:default}
+.page-d .cell[data-l="1"]{background:var(--heat-1)}
+.page-d .cell[data-l="2"]{background:var(--heat-2)}
+.page-d .cell[data-l="3"]{background:var(--heat-3)}
+.page-d .cell[data-l="4"]{background:var(--heat-4)}
+.page-d .cell[data-void="1"]{background:transparent}
+.page-d .cell:focus-visible{outline:none;box-shadow:0 0 0 2px var(--accent)}
+.page-d .d-tip{flex:none;height:20px;font-size:var(--fs-min);color:var(--body);line-height:20px;
+  display:flex;align-items:center;justify-content:flex-start;gap:var(--sp-sm);overflow:hidden;white-space:nowrap}
+.page-d .d-tip b{font-weight:var(--w-emph);color:var(--ink)}
+.page-d .d-tip .dim{color:var(--mute);overflow:hidden;text-overflow:ellipsis}
+.page-d .d-scale{display:flex;align-items:center;gap:var(--sp-xs);flex:none;margin-inline-start:var(--sp-sm)}
+.page-d .d-scale i{width:8px;height:8px;border-radius:2px;display:block}
+
+
+/* ==========================================================================
+   E 页 · 今日 AI 大事（AIHOT）—— 这一页是阅读不是扫视，五条等权
+   ========================================================================== */
+.page-e .ewrap{flex:1;display:flex;flex-direction:column;gap:var(--sp-sm);min-height:0}
+.page-e .e-head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--sp-sm);flex:none;height:20px}
+.page-e .e-title{font-size:var(--fs-body-r);font-weight:var(--w-emph);color:var(--ink);white-space:nowrap;line-height:1}
+.page-e .e-upd{font-family:var(--font-num);font-variant-numeric:tabular-nums;
+  font-size:var(--fs-min);color:var(--mute);white-space:nowrap;line-height:1}
+.page-e .e-list{flex:1;min-height:0;display:flex;flex-direction:column;gap:var(--sp-xs);overflow:hidden}
+/* 第三列写成 minmax(0,34%) 而不是 auto：auto 列按 max-content 定宽，
+   遇到超长来源名会把整个网格撑出画布（403 宽下必现，edge 态更明显）。 */
+.page-e .e-item{flex:1;min-height:0;display:grid;grid-template-columns:18px minmax(0,1fr) minmax(0,34%);
+  column-gap:var(--sp-sm);align-items:center}
+.page-e .e-no{font-family:var(--font-num);font-feature-settings:var(--num-features);
+  font-variant-numeric:tabular-nums;font-size:var(--fs-min);color:var(--mute);text-align:right;line-height:1}
+.page-e .e-t{font-size:var(--fs-body-r);line-height:1.2;color:var(--ink);text-wrap:balance;
+  display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden;-webkit-line-clamp:var(--e-lines)}
+/* 一个可裁切的格子里放「可变长的来源」+「必须出现的时间」，被裁掉的一定是后者——
+   实机上三条真实 AIHOT 来源名都够长，省略号全落在来源里，时间一条都没渲染出来。
+   改成 flex：时间 flex:none 永不收缩，来源才是被省略的那一半。
+   顺序仍按简报的「来源 · 时间」，时间因此天然右对齐成一列。 */
+.page-e .e-meta{font-size:var(--fs-min);color:var(--mute);line-height:1.2;min-width:0;
+  display:flex;align-items:baseline;justify-content:flex-end;gap:var(--sp-xs)}
+.page-e .e-src{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.page-e .e-time{flex:none;white-space:nowrap}
+.page-e .e-foot{flex:none;height:18px;font-size:var(--fs-min);color:var(--mute);line-height:18px}
 
 /* ==========================================================================
    attention 页 · 整屏只为这一件事

@@ -54,6 +54,13 @@ export type AgentState = {
   stale?: boolean
   /** 订阅档位：codex 的 loginMethod、智谱的 level。随状态推到渲染层，当前没有任何一页画它。 */
   plan?: string
+  /**
+   * 扩展 5（M3b）· 当前 5h 窗内用得最多的模型显示名（≤ 20 字符）。
+   * B 页原来那句「按这个速度用不完」的判语换成它（design/brief-m0-v2.md §2）：
+   * 「够不够撑到重置」由时间带上的落差承担，文字位置让给一个当下才知道的事实。
+   * 没采到就缺省，渲染层留空 —— 不要用「未知」占住那一行。
+   */
+  topModel?: string
 }
 
 /**
@@ -69,11 +76,72 @@ export type AgentEvent = {
   kind: EventKind
   title: string
   summary?: string
+  /** 完成时刻（PLAN §2.3 的 at）。running 行没有完成时刻，这里放最后活动时刻。 */
   at: string
+  /**
+   * 扩展 5（M3b §4）· 最后活动时刻。
+   * `at` 是「这件事什么时候结束的」，`updatedAt` 是「这个 session 最后一次动是什么时候」——
+   * running 的行只有后者，而 C1/C2 两页要显示的正是后者（design/brief-m0-v2.md §1）。
+   * 完成的行两者相等；running 的行 updatedAt 随新活动往前走，逐秒重算相对时间。
+   */
+  updatedAt?: string
+  /** 事件来自哪个会话 —— 同一会话的后续事件覆盖前一条（一个 session 在列表里只占一行） */
+  sessionId?: string
+  /** 工作目录，日志与行尾的路径标注用。不进日志的是内容，不是路径。 */
+  cwd?: string
   /** kind === 'running' 时用它算「已跑多久」 */
   startedAt?: string
   durationMs?: number
   acked: boolean
+}
+
+/* ==========================================================================
+   M3b · v2 数据层：每日用量热力图、AIHOT 新闻。
+   两块都是「页面自己的数据」，与 agent 的额度/事件无关，所以挂在 MonitorState
+   顶层而不是塞进 AgentState —— D 页与 E 页各读各的，缺一个不影响另一个。
+   ========================================================================== */
+
+/** 一天的三家用量。单位三家不同（Codex/Claude 是 token，ZCode 视来源可能是请求数），
+ *  所以不合并成一个 total：合出来的数只有大小、没有意义。热力图用 intensity 着色。 */
+export type UsageDay = {
+  /** 本地日期 YYYY-MM-DD */
+  date: string
+  byAgent: {
+    codex?: { tokens: number }
+    claude?: { tokens: number }
+    zcode?: { tokens?: number; requests?: number }
+  }
+  /** 0–1。三家各自按 8 周窗口内的最大值归一后求均值 —— 与 design/fixtures/usage.json 同口径 */
+  intensity: number
+}
+
+export type UsageData = {
+  updatedAt: string
+  /** 近 N 周，周一起算，含空白天 */
+  weeks: number
+  days: UsageDay[]
+  /** 每家的单位，渲染层 tooltip 用（'tokens' | 'requests'） */
+  units: Partial<Record<AgentId, 'tokens' | 'requests'>>
+  /** 采集失败时保留上一轮的 days，并带一个码；渲染层画 error 态 */
+  error?: NoticeCode
+}
+
+/** AIHOT 的一条。全部当**不可信文本**：只渲染为纯文本，不注入 HTML、不预取 url。 */
+export type NewsItem = {
+  id: string
+  title: string
+  summary?: string
+  source?: string
+  url?: string
+  /** publishedAt，ISO */
+  at?: string
+  reason?: string
+}
+
+export type NewsData = {
+  updatedAt: string
+  items: NewsItem[]
+  error?: NoticeCode
 }
 
 export type SceneName =
@@ -103,9 +171,27 @@ export type MonitorState = {
   events: AgentEvent[]
   /** 事件区整体的空/错态（与单个 agent 的 notice 无关） */
   feedNotice?: Notice
+  /**
+   * 扩展 6（M3）· 横向压缩补偿。
+   * 副屏在 960×540 模式下被面板缩放器横向压 15.6%（EDID 原生 960×640），
+   * 用户用 design/aspect-test.html 的正圆实测系数为 1.19。
+   * 画布逻辑宽度 = round(canvas.width / panelX)，stage 横向再按比例拉回去，
+   * 于是屏上 1px 宽 = 1px 高。960×640 原生模式下为 1.0。
+   */
+  panelX: number
+  /** D 页：每日用量热力图。还没采到第一轮时缺省。 */
+  usage?: UsageData
+  /** E 页：今日 AI 大事。还没采到第一轮时缺省。 */
+  news?: NewsData
 }
 
-export type Page = 'a' | 'b' | 'c' | 'attn'
+/**
+ * 页码。
+ * M1 移植的是 A / B / C / attn 四页；M3b 的 v2 版把 C 拆成 C1/C2 并新增 D、E，
+ * 这里先把名字定下来（IPC 与配置要用），渲染层的 ORDER 仍是 M1 那三页 ——
+ * 六页版的移植要等 designer 交付 design/variations.html 的 v2。
+ */
+export type Page = 'a' | 'b' | 'c' | 'c1' | 'c2' | 'd' | 'e' | 'attn'
 
 /** 主进程 → 渲染层的一次性指令（状态走 MonitorState，不走这里） */
 export type MonitorCommand =
@@ -113,6 +199,10 @@ export type MonitorCommand =
   | { type: 'home' }                // ⌃⌥↑：回 A 并恢复轮播
   /** 截图脚本用：直接定页，不触发手动暂停。token 原样回报，让脚本只认自己那一声 */
   | { type: 'showPage'; page: Page; token: number }
+  /** ⌃⌥] / ⌃⌥[ ：panelX ±0.02；⌃⌥0 复位。值由主进程算好写回配置，这里只推结果。 */
+  | { type: 'panelX'; value: number }
+  /** ⌃⌥C：校准叠层开关（200px 正圆 + 十字线，调到正圆即为补偿到位） */
+  | { type: 'calibrate' }
 
 export type DevApi = {
   /** 场景名 = 喂 fixtures；'live' = 切回真实采集 */

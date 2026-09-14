@@ -6,7 +6,8 @@
       content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; connect-src 'self'">
 <title>Agent Monitor</title>
 <!--
-  纯净视图：没有控制栏，body 就是 --canvas，画布 480×270 靠 zoom: 2 铺满 960×540。
+  纯净视图：没有控制栏，body 就是 --canvas。画布宽度按 panelX 收窄（480 / 1.19 = 403），
+  stage 用非等比 transform 拉回 960×540——面板缩放器把这一屏横向压了 15.6%，这是补偿。
   ?debug=1 时底部浮出原型的控制栏（七态 / 模拟 / 轮播开关 / reduced-motion），
   它是 position:fixed 的工具层，不进画布。
   字体自带（@fontsource），CSP 也不放行外部域 —— 面板不连网。
@@ -24,17 +25,25 @@
     <div class="pages" id="pages">
       <section class="page page-a" data-p="a"><h2 class="sr">额度总览</h2><div class="tiles" id="paTiles"></div></section>
       <section class="page page-b" data-p="b"><h2 class="sr">额度详情</h2><div class="bands" id="pbBands"></div></section>
-      <section class="page page-c" data-p="c"><h2 class="sr" id="feedTitle">最近完成</h2><div class="feed" id="pcFeed"></div></section>
+      <section class="page page-c" data-p="c1"><h2 class="sr" id="feedTitle">最近的 session</h2><div class="feed" id="pc1Feed"></div></section>
+      <section class="page page-c" data-p="c2"><h2 class="sr">更早的 session</h2><div class="feed" id="pc2Feed"></div></section>
+      <section class="page page-d" data-p="d"><h2 class="sr">每日用量</h2><div class="dwrap" id="pdHeat"></div></section>
+      <section class="page page-e" data-p="e"><h2 class="sr">今日 AI 大事</h2><div class="ewrap" id="peNews"></div></section>
       <section class="page page-attn" data-p="attn"><h2 class="sr">需要你</h2><div id="paAttn"></div></section>
       <button type="button" class="edge" data-side="prev" aria-label="上一页"></button>
       <button type="button" class="edge" data-side="next" aria-label="下一页"></button>
-      <div class="dots" id="dots" data-not-accent>
-        <span class="holdmark" id="holdmark" data-not-accent hidden>&#8214;</span>
-        <button type="button" data-p="a" data-not-accent aria-label="第 1 页 总览"></button>
-        <button type="button" data-p="b" data-not-accent aria-label="第 2 页 额度详情"></button>
-        <button type="button" data-p="c" data-not-accent aria-label="第 3 页 事件"></button>
-      </div>
+      <!-- 指示点由 renderDots 按「当前在轮播里的页」重画（C2 空时少一个），
+           所以这里是空的；holdmark 也在那次重画里重建。 -->
+      <div class="dots" id="dots" data-not-accent></div>
     </div>
+  </div>
+  <!-- panelX（M3 附加节）：⌃⌥] / ⌃⌥[ 调 ±0.02 后闪显 1 s；⌃⌥C 切校准叠层。
+       两者都在 .stage 内部 —— 校准圆必须和画布受同一份横向拉伸，才能靠它定系数。 -->
+  <div class="panelx-flash" id="panelxFlash" aria-hidden="true"></div>
+  <div class="calib" id="calib" aria-hidden="true">
+    <div class="cross-h"></div><div class="cross-v"></div>
+    <div class="ring"></div>
+    <div class="hint" id="calibHint">⌃⌥] / ⌃⌥[ 调到正圆 · ⌃⌥C 关闭</div>
   </div>
   <p class="sr" role="status" aria-live="polite" id="live"></p>
 </div>
@@ -42,10 +51,13 @@
 <div class="harness" id="harness">
   <div class="hgroup"><b>页</b>
     <div class="seg" id="segPage" role="group" aria-label="切换页">
-      <button type="button" data-p="a" aria-pressed="true">A 总览</button>
-      <button type="button" data-p="b" aria-pressed="false">B 额度</button>
-      <button type="button" data-p="c" aria-pressed="false">C 事件</button>
-      <button type="button" data-p="attn" aria-pressed="false">attention</button>
+      <button type="button" data-p="a" aria-pressed="true">A</button>
+      <button type="button" data-p="b" aria-pressed="false">B</button>
+      <button type="button" data-p="c1" aria-pressed="false">C1</button>
+      <button type="button" data-p="c2" aria-pressed="false">C2</button>
+      <button type="button" data-p="d" aria-pressed="false">D</button>
+      <button type="button" data-p="e" aria-pressed="false">E</button>
+      <button type="button" data-p="attn" aria-pressed="false">attn</button>
     </div>
   </div>
   <div class="hgroup">

@@ -2,19 +2,22 @@
  * MonitorState 存储 + 变更推送。
  *
  * 两种模式，形状完全一样：
- *   · live（M2 起的默认）—— 额度来自三个 collector 的真实采集，事件仍是 M1 的 fixtures
- *     （完成事件是 M3 的活）。dev 调试栏一旦切了场景就退出 live，免得真实采集把
- *     正在看的那一帧顶掉。
+ *   · live（M2 起的默认）—— 额度、事件、用量、新闻全部来自真实采集（M3 起事件也是真的）。
+ *     dev 调试栏一旦切了场景就退出 live，免得真实采集把正在看的那一帧顶掉。
  *   · scene —— 七个场景全部来自 src/main/fixtures/*.json（design/fixtures 的副本），
  *     与 design/variations.html 的 SCENES 一一对应。截图对账要逐像素对得上，
  *     喂进去的数据就必须是同一份，所以这条路 M2 一个字都没动。
  */
 
 import type {
-  AgentEvent, AgentId, AgentState, CanvasSize, MonitorState, Notice, QuotaWindow, SceneName
+  AgentEvent, AgentId, AgentState, AgentStatus, CanvasSize, MonitorState, NewsData, Notice,
+  QuotaWindow, SceneName, UsageData
 } from '../shared/types.js'
 import type { QuotaResult } from './collectors/quota/types.js'
 import { ERROR_TONE } from './collectors/quota/types.js'
+import { Feed } from './collectors/events/feed.js'
+import type { EventInput } from './collectors/events/types.js'
+import { PANEL_X_COMPRESSED } from './config.js'
 // 直接 import JSON：打包时由 rollup 内联进 out/main/index.js，
 // 省掉一条「运行时去哪儿找 fixtures」的路径分支（dev 与打包后的目录并不一样）。
 import quotaJson from './fixtures/quota.json' with { type: 'json' }
@@ -98,7 +101,10 @@ const okAgents = (over: Partial<Record<AgentId, AgentState['status']>> = {}): Ag
   agent('zcode', over.zcode ?? 'idle', ZCODE)
 ]
 
-const SCENES: Record<SceneName, () => Omit<MonitorState, 'scene' | 'canvas'>> = {
+/** 场景只造「画什么」，不造「画多宽」——canvas 与 panelX 跟着显示器与配置走，与场景无关 */
+type SceneBody = Omit<MonitorState, 'scene' | 'canvas' | 'panelX'>
+
+const SCENES: Record<SceneName, () => SceneBody> = {
   populated: () => ({
     generatedAt: QUOTA.generatedAt,
     loading: false,
@@ -212,7 +218,8 @@ export function mergeQuota(prev: AgentState, result: QuotaResult, nowIso: string
       status: 'idle',
       windows: result.windows,
       updatedAt: result.sampledAt ?? nowIso,
-      plan: result.plan ?? prev.plan
+      plan: result.plan ?? prev.plan,
+      ...(prev.topModel ? { topModel: prev.topModel } : {})
     }
   }
   const carried = CLEARS_WINDOWS.has(result.code)
@@ -230,11 +237,28 @@ export function mergeQuota(prev: AgentState, result: QuotaResult, nowIso: string
     updatedAt: result.windows?.length ? (result.sampledAt ?? nowIso) : prev.updatedAt,
     notice: { tone, code: result.code },
     ...(stale ? { stale: true } : {}),
-    plan: prev.plan
+    plan: prev.plan,
+    ...(prev.topModel ? { topModel: prev.topModel } : {})
   }
 }
 
 type Listener = (state: MonitorState) => void
+
+/**
+ * 事件状态 > 额度状态。
+ * 「有人在等你」与「有人在跑」是这块屏要回答的第二个问题，比「额度接口连不上」更重要。
+ *
+ * **事件侧的 offline 刻意不放行**（复核 P2-2.4 指出它上不了屏 —— 确实如此，是有意的）：
+ * 身份点的判据在 M2 复核里已经定死为「屏上还有没有数字」。ZCode 的 tasks 库读不到时
+ * 额度那条链可能好好的、瓦片上挂着真实百分比，这时候把身份点熄掉是在说谎。
+ * 「事件源离线」需要自己的表达位（C 页的一行空态文案，而不是身份点），那是设计问题，
+ * 留给 designer 在 M4 定。在那之前 collector 报的 offline 只进日志与 eventStatus，不上屏。
+ */
+export function combineStatus(quota: AgentStatus, event: AgentStatus | null): AgentStatus {
+  if (event === 'attention') return 'attention'
+  if (event === 'running') return 'running'
+  return quota
+}
 
 export class Store {
   private state: MonitorState
@@ -245,6 +269,17 @@ export class Store {
   private mode: 'live' | 'scene'
   /** 三家最近一次的真实状态。dev 切到场景之后采集仍然写这里，只是不再上屏。 */
   private live: Record<AgentId, AgentState>
+  /** M3 · 真实事件流。scene 模式下照收不上屏，切回 live 时它已经是最新的。 */
+  private feed = new Feed()
+  /** 事件侧给出的 per-agent 状态（running / attention / offline），与额度侧分开存 */
+  private eventStatus: Partial<Record<AgentId, AgentStatus>> = {}
+  /** M3b · B 页的「当前窗口最常用模型」 */
+  private topModel: Partial<Record<AgentId, string>> = {}
+  private usage: UsageData | undefined
+  private news: NewsData | undefined
+  private panelX = PANEL_X_COMPRESSED
+  /** 事件流变了就喊一声，由主进程接去落盘（Store 不碰文件系统） */
+  private onFeedChange: ((events: AgentEvent[]) => void) | null = null
 
   constructor(initial: SceneName | 'live' = 'live') {
     this.mode = initial === 'live' ? 'live' : 'scene'
@@ -258,17 +293,133 @@ export class Store {
       ? {
           scene: 'populated',
           canvas: this.canvas,
+          panelX: this.panelX,
           generatedAt: at,
           // 首轮采样到达之前是骨架屏；到了就翻 false（applyQuota）
           loading: true,
           agents: this.liveAgents(),
-          events: baseFeed()
+          events: [],
+          feedNotice: { tone: 'empty', code: 'feed_empty' }
         }
-      : { scene: initial, ...SCENES[initial](), canvas: this.canvas }
+      : { scene: initial, ...SCENES[initial](), canvas: this.canvas, panelX: this.panelX }
   }
 
   private liveAgents(): AgentState[] {
-    return [this.live.codex, this.live.claude, this.live.zcode]
+    return (['codex', 'claude', 'zcode'] as AgentId[]).map(id => {
+      const base = this.live[id]
+      const status = combineStatus(base.status, this.eventStatus[id] ?? null)
+      const top = this.topModel[id]
+      return {
+        ...base,
+        status,
+        ...(top ? { topModel: top } : {})
+      }
+    })
+  }
+
+  /** live 模式下的整份状态。事件与额度都从各自的「最近一次」重算，不做增量。 */
+  private liveState(over: Partial<MonitorState> = {}): MonitorState {
+    const events = this.feed.list()
+    const next: MonitorState = {
+      ...this.state,
+      canvas: this.canvas,
+      panelX: this.panelX,
+      agents: this.liveAgents(),
+      events,
+      ...(this.usage ? { usage: this.usage } : {}),
+      ...(this.news ? { news: this.news } : {}),
+      ...over
+    }
+    // 事件区的空态：一条都没有时说「今天还没有完成的任务」，有了就撤掉
+    if (events.length) delete next.feedNotice
+    else next.feedNotice = { tone: 'empty', code: 'feed_empty' }
+    return next
+  }
+
+  /** 主进程接走「事件流变了」这件事去落盘 */
+  onEvents(fn: (events: AgentEvent[]) => void): void {
+    this.onFeedChange = fn
+  }
+
+  /**
+   * 启动时从 userData 回灌：全部已读，不打断、不响铃。
+   *
+   * 回灌完必须喊一声 onFeedChange（复核 P1-①）。不喊的话，「稳态重启」这条最常见的路上
+   * ——盘上 50 条、三家回灌全部撞 id 被去重、这一程没有任何新事件——
+   * Saver 手里的快照自始至终是空表，退出时 flush 就把 events.json 写成 `[]`，
+   * 历史被抹掉一次。喊了之后「磁盘上该是什么」从启动第一刻起就有定义。
+   */
+  restoreEvents(events: AgentEvent[]): void {
+    this.feed.restore(events)
+    this.onFeedChange?.(this.feed.list())
+    if (this.mode === 'live') this.emit(this.liveState())
+  }
+
+  /**
+   * collector 推来一条事件。
+   * `isNew` = 「这是 app 启动之后新到的」——只有它为真时才可能未读、才可能打断。
+   * 启动回灌、重启恢复都走 isNew=false（简报「统一行为」第 4 条）。
+   */
+  ingestEvent(input: EventInput, isNew: boolean): AgentEvent | null {
+    const ev = this.feed.ingest(input, isNew)
+    if (!ev) return null
+    this.refreshEventStatus(ev.agent)
+    this.onFeedChange?.(this.feed.list())
+    if (this.mode === 'live') this.emit(this.liveState({ generatedAt: new Date().toISOString() }))
+    return ev
+  }
+
+  /** collector 直接报的状态（目前只有 offline：事件源本身连不上） */
+  setEventStatus(agent: AgentId, status: AgentStatus): void {
+    if (this.eventStatus[agent] === status) return
+    this.eventStatus[agent] = status
+    if (this.mode === 'live') this.emit(this.liveState())
+  }
+
+  private refreshEventStatus(agent: AgentId): void {
+    /* 直接覆盖。原来这里有一条「offline 粘住不放」的保护，但 combineStatus 本来就不放行
+       offline（见上），那条保护于是只剩一个副作用：短暂离线之后再也回不到 running ——
+       collector 的恢复分支只打日志、不重新报状态（复核 P2-2.4 的顺带提醒）。
+       既然 offline 上不了屏，就别让它悄悄卡住真正会上屏的那两个。 */
+    this.eventStatus[agent] = this.feed.statusFor(agent)
+  }
+
+  /** running 超时清除（每分钟一次，由主进程驱动） */
+  sweepRunning(now = Date.now()): AgentEvent[] {
+    const dropped = this.feed.sweepRunning(now)
+    if (!dropped.length) return dropped
+    for (const id of new Set(dropped.map(d => d.agent))) this.refreshEventStatus(id)
+    this.onFeedChange?.(this.feed.list())
+    if (this.mode === 'live') this.emit(this.liveState())
+    return dropped
+  }
+
+  setTopModel(agent: AgentId, name: string | undefined): void {
+    if (this.topModel[agent] === name) return
+    if (name) this.topModel[agent] = name
+    else delete this.topModel[agent]
+    if (this.mode === 'live') this.emit(this.liveState())
+  }
+
+  setUsage(usage: UsageData): void {
+    this.usage = usage
+    if (this.mode === 'live') this.emit(this.liveState())
+  }
+
+  setNews(news: NewsData): void {
+    this.news = news
+    if (this.mode === 'live') this.emit(this.liveState())
+  }
+
+  /** 横向压缩补偿。值由 main 的 PanelXConfig 算好写回配置，这里只负责上屏。 */
+  setPanelX(panelX: number): void {
+    if (this.panelX === panelX) return
+    this.panelX = panelX
+    this.emit({ ...this.state, panelX })
+  }
+
+  getPanelX(): number {
+    return this.panelX
   }
 
   /** live 用真时间；scene 用 fixtures 冻住的时间原点（截图可复现） */
@@ -281,7 +432,7 @@ export class Store {
     const nowIso = new Date().toISOString()
     this.live[id] = mergeQuota(this.live[id], result, nowIso)
     if (this.mode !== 'live') return
-    this.emit({ ...this.state, generatedAt: nowIso, loading: false, agents: this.liveAgents() })
+    this.emit(this.liveState({ generatedAt: nowIso, loading: false }))
   }
 
   setCanvas(canvas: CanvasSize): void {
@@ -307,49 +458,69 @@ export class Store {
 
   setScene(scene: SceneName): void {
     this.mode = 'scene'
-    this.emit({ scene, ...SCENES[scene](), canvas: this.canvas })
+    this.emit({ scene, ...SCENES[scene](), canvas: this.canvas, panelX: this.panelX })
   }
 
   /** 从 fixtures 场景切回真实采集（调试栏点过场景之后的回程，复核 §3.5） */
   setLive(): void {
     this.mode = 'live'
-    this.emit({
-      ...this.state,
+    this.emit(this.liveState({
       scene: 'populated',
       generatedAt: new Date().toISOString(),
-      loading: false,
-      agents: this.liveAgents(),
-      events: baseFeed(),
-      feedNotice: undefined
-    })
+      loading: false
+    }))
   }
 
-  /** 打断 2 · 新事件：进 feed 顶部，未读 */
+  /**
+   * 打断 2 · 新事件（dev）。
+   * live 模式下走与真实事件**同一条**路（Feed.ingest → refreshEventStatus → emit），
+   * 否则演练验的就不是上线时那条路；scene 模式下仍然只改屏上的那一份。
+   */
   simulateEvent(): AgentEvent {
     const s = POOL[this.seq++ % POOL.length]!
-    const ev: AgentEvent = {
+    const at = new Date(this.nowMs()).toISOString()
+    const input: EventInput = {
       id: `new${this.seq}-${Date.now()}`,
       agent: s.agent,
       kind: 'completed',
       title: s.title,
       summary: s.summary,
-      at: new Date(this.nowMs()).toISOString(),
-      acked: false
+      at,
+      updatedAt: at,
+      sessionId: `sim-${this.seq}`
     }
-    const base = this.state.events.length ? this.state : { ...this.state, ...SCENES.populated(), scene: 'populated' as SceneName, canvas: this.canvas }
+    if (this.mode === 'live') return this.ingestEvent(input, true) ?? { ...input, acked: false }
+    const ev: AgentEvent = { ...input, acked: false }
+    const base = this.state.events.length ? this.state
+      : { ...this.state, ...SCENES.populated(), scene: 'populated' as SceneName, canvas: this.canvas }
     this.emit({ ...base, feedNotice: undefined, events: [ev, ...base.events] })
     return ev
   }
 
   /** 打断 1 · attention */
   simulateAttention(): void {
-    if (this.state.events.some(e => e.kind === 'attention' && !e.acked)) return
-    const base = this.state.events.length ? this.state : { ...this.state, ...SCENES.populated(), scene: 'populated' as SceneName, canvas: this.canvas }
-    const ev: AgentEvent = { ...ATTN_EVENT, id: 'attn-' + Date.now(), at: new Date(this.nowMs()).toISOString() }
+    if (this.hasAttention()) return
+    const at = new Date(this.nowMs()).toISOString()
+    if (this.mode === 'live') {
+      this.ingestEvent({
+        ...ATTN_EVENT, id: 'attn-' + Date.now(), at, updatedAt: at, sessionId: 'sim-attn'
+      }, true)
+      return
+    }
+    const base = this.state.events.length ? this.state
+      : { ...this.state, ...SCENES.populated(), scene: 'populated' as SceneName, canvas: this.canvas }
+    const ev: AgentEvent = { ...ATTN_EVENT, id: 'attn-' + Date.now(), at }
     this.emit({ ...base, feedNotice: undefined, events: [ev, ...base.events] })
   }
 
   clearAttention(): void {
+    if (this.mode === 'live') {
+      if (!this.feed.clearAttention()) return
+      for (const id of ['codex', 'claude', 'zcode'] as AgentId[]) this.refreshEventStatus(id)
+      this.onFeedChange?.(this.feed.list())
+      this.emit(this.liveState())
+      return
+    }
     const events = this.state.events.filter(e => e.kind !== 'attention')
     if (events.length === this.state.events.length) return
     this.emit({ ...this.state, events })
@@ -357,6 +528,13 @@ export class Store {
 
   /** ack 一条：attention 行 ack 即解除接管（acked 之后它就不再是「等着你」的那条） */
   ack(id: string): void {
+    if (this.mode === 'live') {
+      if (!this.feed.ack(id)) return
+      for (const a of ['codex', 'claude', 'zcode'] as AgentId[]) this.refreshEventStatus(a)
+      this.onFeedChange?.(this.feed.list())
+      this.emit(this.liveState())
+      return
+    }
     let hit = false
     const events = this.state.events.map(e => {
       if (e.id !== id || e.acked) return e
@@ -367,6 +545,13 @@ export class Store {
   }
 
   hasAttention(): boolean {
-    return this.state.events.some(e => e.kind === 'attention' && !e.acked)
+    const list = this.mode === 'live' ? this.feed.list() : this.state.events
+    return list.some(e => e.kind === 'attention' && !e.acked)
+  }
+
+  /** 未读条数（日志与 selftest 用） */
+  unread(): number {
+    return this.mode === 'live' ? this.feed.unread()
+      : this.state.events.filter(e => !e.acked).length
   }
 }

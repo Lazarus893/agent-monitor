@@ -1,5 +1,5 @@
 /**
- * 截图：四页 × 七态 = 28 张到 design/shots/m1/。
+ * 截图：七页（A/B/C1/C2/D/E + attention）× 七态 = 49 张到 design/shots/m3/。
  *
  * 由主进程在 MONITOR_SHOOT=1 时调用（`pnpm shoot`）——capturePage 只有主进程能调，
  * 单独起一个 node 脚本反而要再造一条 IPC 通道。这里做的是「驱动」：
@@ -22,10 +22,14 @@ import { SCENE_NAMES } from '../src/shared/types.js'
 import type { Page, SceneName } from '../src/shared/types.js'
 import type { Store } from '../src/main/state.js'
 
+/** v2 六页 + attention。C2 为空时 showPage 仍然定得过去（它只是不在轮播里）。 */
 const PAGES: Array<{ page: Page; slug: string }> = [
   { page: 'a', slug: 'a' },
   { page: 'b', slug: 'b' },
-  { page: 'c', slug: 'c' },
+  { page: 'c1', slug: 'c1' },
+  { page: 'c2', slug: 'c2' },
+  { page: 'd', slug: 'd' },
+  { page: 'e', slug: 'e' },
   { page: 'attn', slug: 'attention' }
 ]
 
