@@ -40,6 +40,48 @@ export function sourceName(v: unknown): string | undefined {
   return undefined
 }
 
+/**
+ * 「发布渠道」类的通用词。左半截是它们之一时，真正的来源名在**右边**。
+ * 只列观察到的与显然同类的几个 —— 这是一份判据，不是一份词典，
+ * 漏了一个的代价只是那一条少剥一层前缀，不会剥错。
+ */
+const CHANNEL_WORDS = new Set([
+  '公众号', '微信公众号', '微信', '知乎', '知乎专栏', '专栏', '博客', '播客',
+  'rss', '订阅', '新闻', '资讯', '论坛', '媒体', '来源', 'blog', 'podcast', 'newsletter'
+])
+
+/**
+ * 把 AIHOT 的来源名收成能读的主名（设计终审 E-1）。
+ *
+ * E 页来源列实测只有约 72px ≈ 5 个全角字。原样渲染的结果是
+ * `公众号： …` —— 前缀刚好吃光整列，真正的来源名一个字都没露出来，信息量为零。
+ *
+ * 三条实测样本（tests/fixtures/aihot-selected.json，2026-09-14 当场抓的）：
+ *   `公众号：小红书技术（dots.llm）`                   → `小红书技术`
+ *   `Gary Marcus：The Road to AI We Can Trust（RSS）`  → `Gary Marcus`
+ *   `Hacker News：AI 热帖`                             → `Hacker News`
+ *
+ * 规则（按这个顺序）：
+ *   1. 去掉括注 —— `（dots.llm）` / `(RSS)` 都是补充说明，不是名字；
+ *   2. 在**第一个**冒号（全角或半角）处切开；
+ *   3. 左半截是「公众号 / 知乎 / RSS」这类**发布渠道**词 → 取右半截，否则取左半截。
+ *      为什么不是「取较短的那段」：`Hacker News：AI 热帖` 的右边更短，但主名在左边。
+ *   4. 任何一步把字剥光了就退回上一步的结果 —— 宁可显示一个长名字，也不显示空白。
+ *
+ * 只在**取来源名**这一步做，不碰 title / summary：那两个字段是正文，
+ * 删正文是编辑行为，不是清洗。
+ */
+export function shortSource(raw: string): string {
+  const stripped = oneLine(raw.replace(/[（(][^）)]*[）)]/g, ' ')).trim()
+  const base = stripped || oneLine(raw).trim()
+  const m = /^([^：:]+)[：:](.+)$/.exec(base)
+  if (!m) return base
+  const left = m[1]!.trim()
+  const right = m[2]!.trim()
+  const pick = CHANNEL_WORDS.has(left.toLowerCase()) ? right : left
+  return pick || base
+}
+
 /** links 里优先 AIHOT 阅读页，其次原文；两者都没有才看 url 字段 */
 export function pickUrl(item: Record<string, unknown>): string | undefined {
   const links = item['links']
@@ -69,7 +111,7 @@ export function parseItems(raw: unknown, limit = 5): NewsItem[] {
       item.summary = clip(it['summary'], SUMMARY_MAX)
     }
     const src = sourceName(it['source'])
-    if (src) item.source = clip(src, 40)
+    if (src) item.source = clip(shortSource(src), 40)
     const url = pickUrl(it)
     if (url) item.url = url
     const at = it['publishedAt'] ?? it['at']

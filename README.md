@@ -200,6 +200,18 @@ pnpm icons        # 重新生成托盘图与 icon.icns（需要 Pillow，平时�
 `MONITOR_LOG_DIR` / hook 端口与截图目录，互不覆盖，也不碰你真实的
 `~/.agent-monitor`、`~/.claude`、`~/Library/Logs`。
 
+> **`selftest` / `shoot` 只能跑在 dev 上，打包版跑不了 —— 这是设计如此，不是缺陷。**
+> 它们要用 `window.monitor.dev`（模拟事件、模拟 attention、切场景），而那个子对象
+> 由构建期常量守着，`pnpm build` 的产物里整段被摇掉（产物里不该留一个「模拟 attention」
+> 的方法能被调到）。拿打包版跑 `MONITOR_SELFTEST=1` 的结果是：走到第 5 步
+> `window.monitor.dev.simulateEvent()` 抛 `Script failed to execute`，
+> 然后**停在那儿不动**——实测过。
+>
+> 所以真机截图、七态对账、自检，一律用 `pnpm selftest` / `pnpm shoot`（dev 服务器），
+> 渲染层是同一份源码、数据是同一份真实采集。
+> 打包版要验的是**另一些东西**：落位、托盘、登录项、签名、日志轮转——看
+> `~/Library/Logs/Agent Monitor/main.log` 里的 `[displays] 落位后 …` 与 `[tray] 就位 …`。
+
 几个开发期的环境变量：
 
 | 变量 | 用途 |

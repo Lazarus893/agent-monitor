@@ -82,6 +82,12 @@ export function toInt(v: unknown): number | null {
 export const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null
 
-/** 日志里的一行摘要：`5h=22% 7d=7%`。只出百分比，不出任何来源字段。 */
+/**
+ * 日志里的一行摘要：`5h=22% 7d=7%`。只出百分比，不出任何来源字段。
+ *
+ * 占位窗（没有重置时刻）标成 `5h=absent`，不是 `5h=0%` —— 这两件事在屏上长得一样，
+ * 在日志里必须分得开：前者是「这一程没用过，Claude Code 连这个键都没给」，
+ * 后者是「真的用了 0%」。缺 five_hour 那次的排查就卡在这一行读不出区别上。
+ */
 export const summarize = (windows: QuotaWindow[]): string =>
-  windows.map(w => `${w.label}=${w.usedPercent}%`).join(' ') || '(无窗口)'
+  windows.map(w => `${w.label}=${w.resetsAt ? `${w.usedPercent}%` : 'absent'}`).join(' ') || '(无窗口)'

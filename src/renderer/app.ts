@@ -47,10 +47,18 @@ declare global {
  * 这里存的是 **token 名**不是色值：ZCode 的蓝是对着 Claude 的橙做过 OKLCH 校准的，
  * 抄一份 hex 过来，任何一边重新调色时就会分家。
  */
-const AGENTS: Record<AgentId, { name: string; tag: string; color: string; fill: string }> = {
-  codex: { name: 'Codex', tag: 'Codex', color: 'var(--id-codex)', fill: 'var(--quota-fill-codex)' },
-  claude: { name: 'Claude Code', tag: 'Claude', color: 'var(--id-claude)', fill: 'var(--quota-fill-claude)' },
-  zcode: { name: 'ZCode', tag: 'ZCode', color: 'var(--id-zcode)', fill: 'var(--quota-fill-zcode)' }
+type AgentBrand = { name: string; shortName: string; tag: string; color: string; fill: string }
+
+/**
+ * `shortName` 是 A 页瓦片标题用的短名（终审 A-2）。
+ * 141px 的瓦片放不下「Claude Code」，原来被截成「Claude Co…」——
+ * 瓦片上**唯一**的身份标签被省略掉了一半，而省略号本身不携带任何信息。
+ * 标题改用短名，`aria-label` 仍然是全名，屏幕阅读器那边一个字不少。
+ */
+const AGENTS: Record<AgentId, AgentBrand> = {
+  codex: { name: 'Codex', shortName: 'Codex', tag: 'Codex', color: 'var(--id-codex)', fill: 'var(--quota-fill-codex)' },
+  claude: { name: 'Claude Code', shortName: 'Claude', tag: 'Claude', color: 'var(--id-claude)', fill: 'var(--quota-fill-claude)' },
+  zcode: { name: 'ZCode', shortName: 'ZCode', tag: 'ZCode', color: 'var(--id-zcode)', fill: 'var(--quota-fill-zcode)' }
 }
 
 const WIN5H = 5 * 3600 * 1000
@@ -140,7 +148,12 @@ const sameDay = (a: Date, b: Date): boolean =>
   a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
 
 const countdown = (iso: string, ref: number): string => {
-  const ms = Math.max(0, new Date(iso).getTime() - ref)
+  /* 没有重置时刻 → 「—」。采集侧在「5h 窗这一程没有任何使用记录」时会补一个
+     `resetsAt: ''` 的占位窗（Claude Code 会整个省掉 five_hour 这个键）。
+     不挡住的话这里会算出 NaN，屏上是 `NaNhNaNm`。 */
+  const t = new Date(iso).getTime()
+  if (!iso || Number.isNaN(t)) return '—'
+  const ms = Math.max(0, t - ref)
   const m = Math.floor(ms / 60000), h = Math.floor(m / 60)
   return h > 0 ? `${h}h${p2(m % 60)}m` : `${m}m`
 }
@@ -358,7 +371,7 @@ function renderPageA(): void {
   el.paTiles.innerHTML = scene.tiles.map(t => {
     const a = AGENTS[t.agent]
     const lv = t.phase === 'ok' ? level(t.windows[0].usedPercent) : 'ok'
-    const head = `<div class="tile-head"><h2 class="tile-name">${esc(a.name)}</h2>` +
+    const head = `<div class="tile-head"><h2 class="tile-name">${esc(a.shortName)}</h2>` +
       `<span class="iddot"${t.status === 'offline' ? ' data-off="1"' : ''}></span></div>`
     let body: string
     if (t.phase === 'loading') {
@@ -416,7 +429,8 @@ function renderPageB(): void {
         <div class="bandbox">
           <div class="band" role="img" aria-label="5h 窗已用 ${w5.usedPercent}%，右端为重置点">
             <span class="used" style="width:${w5.usedPercent}%"></span>
-            <span class="caret" data-caret="${start}"></span></div>
+            </div>
+          <span class="caret" data-caret="${start}"></span>
           <span class="resettick"></span></div>`
     }
     return `<section class="tile" data-status="${t.status}" data-level="${lv}" style="--idc:${a.color};--fill:${a.fill}" ` +
@@ -549,16 +563,28 @@ function renderPageD(): void {
   }
   const days = usage.days
   const maxI = days.reduce((m, d) => Math.max(m, d.intensity || 0), 0)
-  /* 列数由画布宽度决定：每列 cell+2px，减去星期标签列与间隙。
-     403 宽（panelX 补偿后）比 480 少放两三列，所以不能写死。 */
-  const cell = 13
+  /* D-1 · cell 原来写死 13px，而 cols 是「宽度能放下多少列」的上限（算出 23）——
+     版面按 23 列设计、数据给了 8 列，中间缺了「回流到格子尺寸」这一步：
+     热力图只占可用宽的 30%，单格 2.08mm，而这是唯一一页需要分辨密度差异的页。
+     改成由宽 / 高两个预算里较小的那个推出，上限 28px、下限 10px：
+     今天的 8 周给 cell 18（单格 2.88mm，+92% 面积、纵向填满），
+     数据长到 26 周时同一个公式自己降回密排，不需要再改第二次。 */
   const avail = el.pdHeat.clientWidth || 387
-  const cols = Math.max(4, Math.min(Math.ceil(days.length / 7),
-    Math.floor((avail - 26 - 8 + 2) / (cell + 2))))
+  const gridW = avail - 26 - 8                                              // 减掉星期标签列与它的间隙
+  const gridH = Math.max(42, el.pdHeat.clientHeight - 20 - 8 - 20 - 8)      // 减掉页眉 / 说明行与两道间隙
+  const cols = Math.max(4, Math.min(Math.ceil(days.length / 7), Math.floor((gridW + 2) / 12)))
   const shown = days.slice(-cols * 7)
   if (!shown.length) { el.pdHeat.innerHTML = ''; return }
   /* 第一格对齐到周一：JS 的 getDay() 周日是 0 */
   const firstIdx = (new Date(shown[0]!.date).getDay() + 6) % 7
+  /* 列宽要按**真正会画出来的列数**算：开头补齐到周一的空格会把最后一周挤成第 9 列，
+     按 8 列算宽度就会多画一列、整页溢出 17px（原型第一版就是这么溢的）。 */
+  const drawnCols = Math.ceil((firstIdx + shown.length) / 7)
+  /* 列宽填满可用宽（上限 48，列数很少时不至于长成色块），行高取 min(列宽, 高预算 / 7)
+     并封顶 28：8 周 → 42×18 填满宽高，26 周 → 11×11 方格并纵向居中，自己退化。
+     **格子不再是正方形** —— 横向是「哪一周」，纵向是「星期几」，两个轴本来就不同质。 */
+  const cellW = Math.max(10, Math.min(48, Math.floor((gridW + 2) / drawnCols) - 2))
+  const cellH = Math.max(10, Math.min(28, cellW, Math.floor((gridH + 2) / 7) - 2))
   const cellsHtml = Array.from({ length: firstIdx }, () =>
     '<span class="cell" data-void="1" aria-hidden="true"></span>').join('') +
     shown.map(d => {
@@ -569,32 +595,38 @@ function renderPageD(): void {
   const weeks = usage.weeks || Math.round(shown.length / 7)
   el.pdHeat.innerHTML = `
     <div class="d-head"><span class="d-title">每日用量 · 近 ${weeks} 周</span>
-      <span class="d-legend">${(['codex', 'claude', 'zcode'] as AgentId[]).map(id =>
-        `<span style="--idc:${AGENTS[id].color}"><i></i>${esc(AGENTS[id].tag)}</span>`).join('')}</span></div>
-    <div class="d-grid" style="--cell:${cell}px">
+      <span class="d-hint">颜色越亮用得越多</span>
+      <span class="d-date" id="dDate"></span></div>
+    <div class="d-grid" style="--cell-w:${cellW}px;--cell-h:${cellH}px">
       <div class="d-days">${DAY_LABEL.map(x => `<span>${x}</span>`).join('')}</div>
       <div class="d-cells" id="dCells">${cellsHtml}</div>
     </div>
-    <div class="d-tip" id="dTip"></div>`
+    <div class="d-tip"><span class="d-nums" id="dNums"></span></div>`
 
   const cells = [...el.pdHeat.querySelectorAll<HTMLElement>('.cell[data-date]')]
   const byDate = new Map(days.map(d => [d.date, d]))
-  const tip = el.pdHeat.querySelector<HTMLElement>('#dTip')!
+  const dateEl = el.pdHeat.querySelector<HTMLElement>('#dDate')!
+  const nums = el.pdHeat.querySelector<HTMLElement>('#dNums')!
   /* 单位由主进程显式给（usage.units），不靠「哪个键存在」去猜 ——
      ZCode 走 model_usage 时是 token，退回日志时才是请求数，同一个字段两种含义。 */
   const units = usage.units
   const unitWord = (id: AgentId): string => (units[id] === 'requests' ? ' 次' : ' tok')
+  /* D-3 + D-4 · 说明行整条让给三家的数值，一家都不许缺 —— 缺的那家显式渲染成「—」，
+     而不是让省略号把它吞掉（上一版第三家整个消失就是这么来的）。
+     身份色图例同时删掉：那三个色点挂在一张**单色**网格上，是在告诉用户
+     「格子按 agent 着色」，而格子其实只有明度一个维度 —— 图例主动误导。
+     日期上移到页眉右侧，与 E 页的更新时间同一个槽位。 */
   const showTip = (c: HTMLElement): void => {
     const d = byDate.get(c.dataset.date!)
     if (!d) return
     const b = d.byAgent
-    const parts: string[] = []
-    if (b.codex) parts.push(`Codex ${fmtNum(b.codex.tokens || 0)}${unitWord('codex')}`)
-    if (b.claude) parts.push(`Claude ${fmtNum(b.claude.tokens || 0)}${unitWord('claude')}`)
-    if (b.zcode) parts.push(`ZCode ${fmtNum(b.zcode.tokens ?? b.zcode.requests ?? 0)}${unitWord('zcode')}`)
-    tip.innerHTML = `<b>${esc(d.date)}</b><span class="dim">${esc(parts.join(' · '))}</span>` +
-      `<span class="d-scale">${[0, 1, 2, 3, 4].map(l =>
-        `<i style="background:var(--heat-${l})"></i>`).join('')}</span>`
+    const val = (id: AgentId, v: string): string =>
+      `<span>${esc(AGENTS[id].shortName)} <b>${esc(v)}</b></span>`
+    dateEl.textContent = d.date
+    nums.innerHTML =
+      val('codex', b.codex ? fmtNum(b.codex.tokens || 0) + unitWord('codex') : '—') +
+      val('claude', b.claude ? fmtNum(b.claude.tokens || 0) + unitWord('claude') : '—') +
+      val('zcode', b.zcode ? fmtNum(b.zcode.tokens ?? b.zcode.requests ?? 0) + unitWord('zcode') : '—')
     cells.forEach(x => { x.tabIndex = x === c ? 0 : -1 })
   }
   cells.forEach((c, i) => {
@@ -647,6 +679,10 @@ function renderPageE(): void {
         <span class="e-no">${i + 1}</span>
         <span class="e-t">${esc(it.title)}</span>
         <span class="e-meta"><span class="e-src">${esc(it.source ?? 'AIHOT')}</span>
+          <!-- E-1 · 这里**不**再实现一遍剥前缀的规则。原型里有一个 srcName()，
+               那是因为原型没有采集层；本项目的 it.source 只有一个来源，就是
+               collectors/news.ts 的 shortSource()，规则连同实测样本的用例都在那边。
+               渲染层再写一份，就是第二处会漂移的真源 —— 和 tokens.css 只留一份是同一条纪律。 -->
           <span class="e-time" data-newswhen="${esc(it.at ?? updated)}"></span></span>
       </div>`).join('')}</div>
     <div class="e-foot">数据来源：AIHOT</div>`
@@ -698,11 +734,15 @@ function tickTiles(): void {
   document.querySelectorAll<HTMLElement>('[data-word]').forEach(n => {
     const [lv, st] = n.dataset.word!.split('|')
     n.textContent =
+      /* A-1 · 「后重置」删掉：左边 15px 的时钟图标已经把「这是倒计时」说完了，
+         这三个字是对图标的文字复述，而它恰好把 5 字符倒计时（约 80% 的时间）
+         挤出瓦片内宽，被硬切成「后重」—— 一个残缺字形比一个省略号更糟。
+         剩下的四个词都不是复述：它们说的是图标说不了的那件事。 */
       st === 'attention' ? '等待你批准'
         : lv === 'danger' ? '吃紧'
           : lv === 'warn' ? '偏紧'
             : st === 'running' ? '运行中'
-              : '后重置'
+              : ''
   })
   document.querySelectorAll<HTMLElement>('[data-cd]').forEach(n => {
     n.textContent = countdown(n.dataset.cd!, t)

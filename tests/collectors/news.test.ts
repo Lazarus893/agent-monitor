@@ -4,7 +4,11 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { SUMMARY_MAX, TITLE_MAX, parseItems, pickUrl, sourceName } from '../../src/main/collectors/news.js'
+import {
+  SUMMARY_MAX, TITLE_MAX, parseItems, pickUrl, shortSource, sourceName
+} from '../../src/main/collectors/news.js'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { newsWhen } from '../../src/renderer/timefmt.js'
 
 const RESPONSE = {
@@ -38,7 +42,8 @@ describe('parseItems', () => {
     const [a] = parseItems(RESPONSE)
     expect(a!.title).toBe('某团队开源 Search Agent 模型')
     expect(a!.summary).toBe('权重和评测代码已公开，数据与训练配方将陆续公布。')
-    expect(a!.source).toBe('公众号：某技术团队')
+    // E-1 起 source 已经是收过的主名（渠道前缀剥掉），见下面的 shortSource 那一组
+    expect(a!.source).toBe('某技术团队')
     expect(a!.url).toBe('https://aihot.news/items/cmu12ocst0b6nro2nypi25zyq')
     expect(a!.at).toBe('2026-09-14T09:59:00.000Z')
     expect(a!.reason).toBe('给出了完整训练思路。')
@@ -112,5 +117,81 @@ describe('newsWhen', () => {
 
   it('非法时间给空串，不给 Invalid Date', () => {
     expect(newsWhen('nope', t)).toBe('')
+  })
+})
+
+/* ==========================================================================
+   设计终审 E-1 · 来源名要收成能读的主名。
+   E 页来源列只有约 72px ≈ 5 个全角字，`公众号：…` 这种前缀会把整列吃光，
+   屏上剩下的信息量为零。
+   ========================================================================== */
+
+describe('shortSource · 实测样本', () => {
+  /** 2026-09-14 当场从 AIHOT 抓的那一份，三条来源名一字未改 */
+  const LIVE = JSON.parse(
+    readFileSync(join(process.cwd(), 'tests/fixtures/aihot-selected.json'), 'utf8')
+  ) as { items: Array<{ source: { name: string } }> }
+
+  it('fixture 里就是那三条真实来源名', () => {
+    expect(LIVE.items.map(i => i.source.name)).toEqual([
+      '公众号：小红书技术（dots.llm）',
+      'Gary Marcus：The Road to AI We Can Trust（RSS）',
+      'Hacker News：AI 热帖'
+    ])
+  })
+
+  it('三条各自收成主名', () => {
+    expect(LIVE.items.map(i => shortSource(i.source.name)))
+      .toEqual(['小红书技术', 'Gary Marcus', 'Hacker News'])
+  })
+
+  it('剥完都在 6 个全角字以内 —— 那一列放得下', () => {
+    for (const i of LIVE.items) expect(shortSource(i.source.name).length).toBeLessThanOrEqual(11)
+  })
+
+  it('整条链路：parseItems 出来的 source 已经是主名', () => {
+    expect(parseItems(LIVE).map(i => i.source)).toEqual(['小红书技术', 'Gary Marcus', 'Hacker News'])
+  })
+})
+
+describe('shortSource · 规则边界（构造用例，非实测）', () => {
+  it('没有冒号就原样返回', () => {
+    expect(shortSource('少数派')).toBe('少数派')
+    expect(shortSource('V2EX')).toBe('V2EX')
+  })
+
+  it('半角冒号与全角冒号一视同仁', () => {
+    expect(shortSource('公众号: 机器之心')).toBe('机器之心')
+    expect(shortSource('公众号：机器之心')).toBe('机器之心')
+  })
+
+  it('渠道词不分大小写', () => {
+    expect(shortSource('RSS：Simon Willison')).toBe('Simon Willison')
+    expect(shortSource('rss：Simon Willison')).toBe('Simon Willison')
+  })
+
+  it('左半截不是渠道词就取左边 —— 「较短的那段」是错的判据', () => {
+    // 右边更短，但主名在左边
+    expect(shortSource('Hacker News：AI')).toBe('Hacker News')
+  })
+
+  it('半角与全角括注都去掉，位置不限', () => {
+    expect(shortSource('量子位（QbitAI）')).toBe('量子位')
+    expect(shortSource('The Verge (AI)')).toBe('The Verge')
+    expect(shortSource('（转载）少数派')).toBe('少数派')
+  })
+
+  it('只切第一个冒号 —— 后面的冒号是名字的一部分', () => {
+    expect(shortSource('公众号：AI：前沿')).toBe('AI：前沿')
+  })
+
+  it('剥光了就退回去，不返回空串', () => {
+    expect(shortSource('公众号：')).toBe('公众号：')
+    expect(shortSource('（全是括注）')).toBe('（全是括注）')
+    expect(shortSource('   ')).toBe('')
+  })
+
+  it('换行与多余空白压平（来源名是不可信文本）', () => {
+    expect(shortSource('公众号：\n 机器  之心 ')).toBe('机器 之心')
   })
 })

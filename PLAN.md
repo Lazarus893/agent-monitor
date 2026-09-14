@@ -183,7 +183,7 @@ Monitor/
 | **M1 骨架** ✅ 2026-09-14 | electron-vite 5 / Electron 44；`src/main`（displays.pickTarget、RelocateQueue、state、shortcuts）、`src/renderer`（四页移植、画布参数化）、63 条单测、selftest 14 项、28 张对账截图 `design/shots/m1/` | 代码复核 `docs/review/m1-code-review.md`：1 P0 + 4 P1 修复并复验通过；实机插拔由用户验证（待回报） |
 | **M2 额度** ✅ 2026-09-14 | `src/main/collectors/`（scheduler、quota/codex·claude·zcode、keychain）、statusline tee + 安装脚本（已安装，备份 `settings.json.bak-20260914-193421`）、146 单测 | 三家真实数字与 codexbar / 智谱接口当场一致；复核 `docs/review/m2-code-review.md` 4 P1 修复并复验 |
 | **M3 事件** ✅ 2026-09-14 | `collectors/events/`（Codex 监听、Claude hooks + 本地接收、ZCode 轮询、持久化）、v2 六页移植、usage / topModel / news collector、panelX；291 单测、selftest 42 | 真实 `codex exec` 事件 6 s 内上屏（受控 111 ms）；hooks 已安装（备份 `settings.json.bak-20260914-202148`）；复核 `docs/review/m3-code-review.md` 5 P1 修复并复验。待用户实机：ZCode 任务翻转、`claude -p` 触发、拔插副屏 |
-| **M4 打磨** | 「等待你」状态、托盘、登录自启、electron-builder 打成 `~/Applications/Agent Monitor.app`、polish-pass | 四项审查过；连续运行 24h 无泄漏 |
+| **M4 打磨** ✅ 2026-09-14 | 托盘菜单（唯一设置入口）、连接 ZCode 小窗（Keychain）、采集安装/卸载、登录自启、最小菜单、崩溃兜底、日志轮转、ad-hoc 打包到 `~/Applications/Agent Monitor.app`、README；374 单测、selftest 50、30 min soak −6.7% | 复核 `docs/review/m4-code-review.md` 3 P1 修复并复验。待：设计 polish-pass（真机截图）、用户实机验收（登录自启、拔插、ZCode 任务）、24 h 运行 |
 
 每个 collector 的解析器都配 vitest fixture（用本机真实样本脱敏）。
 

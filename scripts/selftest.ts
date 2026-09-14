@@ -16,7 +16,7 @@ import type { BrowserWindow } from 'electron'
 import { app, globalShortcut, Menu, screen } from 'electron'
 import { CH } from '../src/shared/ipc.js'
 import { SCENE_NAMES } from '../src/shared/types.js'
-import type { AgentId, AgentStatus, MonitorCommand, Page } from '../src/shared/types.js'
+import type { AgentId, AgentStatus, MonitorCommand, Page, SceneName } from '../src/shared/types.js'
 import { collectCodex } from '../src/main/collectors/quota/codex.js'
 import { createZcodeCollector } from '../src/main/collectors/quota/zcode.js'
 import type { Store } from '../src/main/state.js'
@@ -396,10 +396,31 @@ export async function runSelftest(win: BrowserWindow, store?: Store): Promise<bo
   })()`
   type TileProbe = { num: string; msg: string; stale: string; off: boolean }
   const probeZcode = (): Promise<TileProbe> => js<TileProbe>(win, zcodeTile)
-  const force = async (code: string | null, waitMs = 1500): Promise<TileProbe> => {
+  /**
+   * 把 zcode 的下一轮采集强制成某个失败码（`null` = 解除），然后等结果上屏。
+   *
+   * `until` 给了就**轮询到满足为止**，不再是睡一个固定时长。
+   * 固定 2500ms 那版是个潜伏的 flake：解除之后要真的走一次智谱接口，
+   * 本机实测过 2995ms 与 3290ms 两次，都超过那个窗口 —— 于是这条断言
+   * 会随网络快慢随机变红，而红的原因跟被测的东西没关系。
+   */
+  const force = async (
+    code: string | null,
+    waitMs = 1500,
+    until?: (t: TileProbe) => boolean
+  ): Promise<TileProbe> => {
     await js(win, `window.monitor.dev.forceError('zcode', ${code === null ? 'null' : `'${code}'`})`)
-    await sleep(waitMs)
-    return probeZcode()
+    if (!until) {
+      await sleep(waitMs)
+      return probeZcode()
+    }
+    const deadline = Date.now() + waitMs
+    let last = await probeZcode()
+    while (Date.now() < deadline && !until(last)) {
+      await sleep(200)
+      last = await probeZcode()
+    }
+    return last
   }
 
   const before = await probeZcode()
@@ -428,7 +449,8 @@ export async function runSelftest(win: BrowserWindow, store?: Store): Promise<bo
     noKey.msg === '未连接' && !noKey.num,
     `${noKey.msg || '(无文案)'}${noKey.num ? ' · 仍显示 ' + noKey.num : ''}`)
 
-  const restored = await force(null, 2500)
+  // 解除之后要真的重走一次智谱接口（本机 0.3–3.3 s 都见过），所以轮询到数字回来为止
+  const restored = await force(null, 12_000, t => !!t.num && !t.stale)
   check('解除模拟后自动恢复真实数字', restored.num === before.num && !restored.stale,
     `${restored.num || '(无数字)'} ← 原 ${before.num}`)
 
@@ -947,6 +969,15 @@ export async function runSelftest(win: BrowserWindow, store?: Store): Promise<bo
      B 页的 topModel 都只有在这里才看得见。轮播 60 s 一页，等不起，直接定页。
      ========================================================================== */
   if (store) {
+    /* 交付用的截图去处（M4 放 design/shots/m4/live 给 polish-pass 用）：
+       `MONITOR_SHOTS_LIVE_DIR=design/shots/m4/live pnpm selftest`。不给就落在自检自己的目录里。
+       真实六页与下面那三张场景图共用它，所以提到 try 外面。 */
+    const override = process.env.MONITOR_SHOTS_LIVE_DIR?.trim()
+    const dir = override
+      ? (override.startsWith('/') ? override : join(process.cwd(), override))
+      : shotDir('live')
+    await mkdir(dir, { recursive: true })
+
     try {
       /* 拍之前把事件流换成**用户真实的历史**（只读地从真 userData 读一份）。
          这一程的 feed 里攒着上面那几条合成事件，直接拍会把「selftest · ZCode 任务」
@@ -955,14 +986,6 @@ export async function runSelftest(win: BrowserWindow, store?: Store): Promise<bo
       store.restoreEvents(load(realUserData()))
       store.setLive()
       await sleep(400)
-      /* 交付用的六页真实截图要能指定去处（M4 放 design/shots/m4/ 给 polish-pass 用）：
-         `MONITOR_SHOTS_LIVE_DIR=design/shots/m4 pnpm selftest`。
-         不给就落在 selftest 自己的目录里。 */
-      const override = process.env.MONITOR_SHOTS_LIVE_DIR?.trim()
-      const dir = override
-        ? (override.startsWith('/') ? override : join(process.cwd(), override))
-        : shotDir('live')
-      await mkdir(dir, { recursive: true })
       const got: string[] = []
       for (const p of ['a', 'b', 'c1', 'c2', 'd', 'e'] as const) {
         win.webContents.send(CH.command, { type: 'showPage', page: p, token: ++token })
@@ -986,6 +1009,44 @@ export async function runSelftest(win: BrowserWindow, store?: Store): Promise<bo
         (synthetic.length ? ` · 混入 ${synthetic.join(',')}` : '') + ` → ${dir}`)
     } catch (err) {
       check('六页真实数据上屏（B 的模型名、D 的格子、E 的条数）', false, String(err))
+    }
+
+    /* 8.6 · 再补三张**场景**图，供设计终审看 accent 纪律。
+       真实数据那六页拍到的永远是「此刻恰好是什么样」——而 accent（未读点、
+       整屏接管、极端值）恰恰是此刻大概率没有的那几种。所以这三张喂 fixtures：
+       它们是场景图，不是真实数据图，文件名里就写明白，别和上面那六张混。 */
+    try {
+      const shots: Array<{ file: string; scene: SceneName; page: Page }> = [
+        { file: 'scene-attention', scene: 'attention', page: 'attn' },
+        { file: 'scene-edge-d', scene: 'edge', page: 'd' },
+        { file: 'scene-c1-unread', scene: 'populated', page: 'c1' }
+      ]
+      const made: string[] = []
+      for (const sh of shots) {
+        store.setScene(sh.scene)
+        await sleep(260)
+        win.webContents.send(CH.command, { type: 'showPage', page: sh.page, token: ++token })
+        await sleep(420)
+        await writeFile(join(dir, `${sh.file}.png`), (await win.webContents.capturePage()).toPNG())
+        made.push(sh.file)
+      }
+      // 这三张各自该有的那个东西真的在画面上，否则拍了也白拍
+      store.setScene('populated')
+      await sleep(200)
+      win.webContents.send(CH.command, { type: 'showPage', page: 'c1', token: ++token })
+      await sleep(300)
+      const unread = await js<number>(win, `document.querySelectorAll('#pc1Feed .row[data-unread="1"]').length`)
+      store.setScene('attention')
+      await sleep(200)
+      const attn = await js<boolean>(win, `!!document.querySelector('#paAttn .attn-card')`)
+      store.setLive()
+      await sleep(200)
+      check('三张场景图已出（attention / edge 的 D 页 / 带未读的 C1）',
+        made.length === 3 && unread > 0 && attn,
+        `${made.join(' ')} · C1 未读 ${unread} 行 · attention 整屏卡片 ${attn} → ${dir}`)
+    } catch (err) {
+      check('三张场景图已出（attention / edge 的 D 页 / 带未读的 C1）', false, String(err))
+      store.setLive()
     }
   }
 
@@ -1089,6 +1150,41 @@ export async function runSelftest(win: BrowserWindow, store?: Store): Promise<bo
   // 量完把尺寸与动画开关都交还回去
   await js(win, "document.documentElement.style.removeProperty('--canvas-h')")
   await js(win, `document.documentElement.dataset.rm = ${JSON.stringify(rmBefore || '0')}`)
+
+  /* ==========================================================================
+     缺 five_hour 时两页都不许把 7d 的数当成 5h（2026-09-15 实机遇到的那次）。
+     Claude Code 在 5h 窗没有任何使用记录时会整个省掉 `five_hour` 这个键；
+     采集侧补一个 `resetsAt:''` 的占位窗，渲染层据此把倒计时显示成「—」。
+     放在最后：这一格会把 claude 的额度换成合成值，不能污染上面那批交付截图。
+     ========================================================================== */
+  if (store) {
+    store.applyQuota('claude', {
+      ok: true,
+      windows: [
+        { label: '5h', usedPercent: 0, resetsAt: '' },
+        { label: '7d', usedPercent: 10, resetsAt: new Date(Date.now() + 107 * 3600_000).toISOString() }
+      ]
+    })
+    await sleep(300)
+    await sendCommand(win, { type: 'showPage', page: 'a' })
+    await sleep(260)
+    const a = await js<{ num: string; cd: string }>(win, `(() => {
+      const t = document.querySelectorAll('#paTiles .tile')[1]
+      return { num: t?.querySelector('.a-nums')?.textContent?.trim() || '',
+               cd: t?.querySelector('.cd')?.textContent?.trim() || '' }
+    })()`)
+    await sendCommand(win, { type: 'showPage', page: 'b' })
+    await sleep(260)
+    const b = await js<{ pc: string; sec: string; cd: string }>(win, `(() => {
+      const t = document.querySelectorAll('#pbBands .tile')[1]
+      return { pc: t?.querySelector('.b-pc')?.textContent?.trim() || '',
+               sec: t?.querySelector('.b-sec')?.textContent?.trim() || '',
+               cd: t?.querySelector('.b-cd')?.textContent?.trim() || '' }
+    })()`)
+    check('缺 five_hour：A 页倒计时「—」、5h 显 0%，B 页 7d 块照常渲染，7d 的数不串到 5h 槽',
+      a.cd === '—' && a.num.startsWith('0') && b.pc === '0%' && b.sec === '7d 10%' && b.cd === '—',
+      `A 数字「${a.num}」倒计时「${a.cd}」 · B 5h「${b.pc}」7d 块「${b.sec || '(缺)'}」倒计时「${b.cd}」`)
+  }
 
   const guardAfter = await Promise.all(guarded.map(fingerprint))
   const drifted = guarded.filter((_f, i) => guardBefore[i] !== guardAfter[i])

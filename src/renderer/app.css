@@ -141,8 +141,10 @@ body{margin:0;background:var(--canvas);overflow:hidden;
 [data-level="warn"]   .num,[data-level="warn"]   .unit{color:var(--quota-warn)}
 [data-level="danger"] .num,[data-level="danger"] .unit{color:var(--quota-danger)}
 
-/* 轨道 --ash 3.64:1；填充 --charcoal 3.57:1；末端一道 2px --canvas 缺口 */
-.bar{background:var(--quota-track);border-radius:var(--r-full);overflow:hidden;flex:none}
+/* B-1 · 轨道 = --surface-elevated 底 + 1px --ash inset 环（环 3.64:1，1.4.11 照过）；
+   填充 --charcoal 3.57:1；末端一道 2px --canvas 缺口 */
+.bar{background:var(--quota-track-fill);box-shadow:inset 0 0 0 1px var(--quota-track-ring);
+  border-radius:var(--r-full);overflow:hidden;flex:none}
 .bar>i{display:block;height:100%;background:var(--fill, var(--quota-fill));border-radius:var(--r-full);
   box-shadow:var(--quota-notch-w) 0 0 var(--quota-notch);
   transition:width var(--dur-bar) var(--ease-standard)}
@@ -178,10 +180,14 @@ body{margin:0;background:var(--canvas);overflow:hidden;
 .page-a .a-nums .unit{font-size:var(--fs-unit-r)}
 /* 倒计时 18px（R4-06 点名要提上来），状态词 14px —— 两者分档才在 123px 的瓦片
    内宽里放得下，也让「数字」与「说明」不再是同一个视觉层 */
+/* A-1b · 裁切策略只写了一半：有 overflow:hidden 没有 text-overflow，溢出就成了齐口
+   硬切（屏上留下残缺字形，读者得不到「这里被切掉了」的信号）。
+   注意 foot 本身是 flex —— flex 容器上的 text-overflow 不通电（同 R5-08 的教训），
+   所以省略号必须落在承载文本的那个 flex item 上：.cd 定长不收缩，.word 可收缩并省略。 */
 .page-a .tile-foot{flex:none;height:24px;display:flex;align-items:baseline;gap:var(--sp-xs);
-  color:var(--mute);white-space:nowrap;overflow:hidden;line-height:1.2}
-.page-a .tile-foot .cd{font-size:var(--fs-cd-a);font-weight:var(--w-emph)}
-.page-a .tile-foot .word{font-size:var(--fs-min)}
+  color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2}
+.page-a .tile-foot .cd{font-size:var(--fs-cd-a);font-weight:var(--w-emph);flex:none}
+.page-a .tile-foot .word{font-size:var(--fs-min);min-width:0;overflow:hidden;text-overflow:ellipsis}
 .page-a .tile-foot svg{align-self:center}
 .page-a .tile-foot svg{color:var(--mute);flex:none}
 .page-a .tile-foot[data-level="warn"]   svg{color:var(--quota-warn)}
@@ -215,9 +221,15 @@ body{margin:0;background:var(--canvas);overflow:hidden;
 .page-b [data-level="warn"]   .b-pc{color:var(--quota-warn)}
 .page-b [data-level="danger"] .b-pc{color:var(--quota-danger)}
 .page-b .b-sec{font-size:var(--fs-body-r);color:var(--mute);flex:none}
-.page-b .b-cd{font-size:var(--fs-min);color:var(--mute);flex:none;width:48px;text-align:right}
+.page-b .b-cd{font-size:var(--fs-min);color:var(--mute);flex:none;width:48px;text-align:right;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* B-1 · 轨道原来是 --ash 实心板：全屏最亮的一块，承载的却是「没用掉的部分」——
+   figure/ground 反过来了（0% 的那条读成「满的」）。WCAG 1.4.11 要的是组件边界
+   可辨识，不是内部实心填到 3:1，所以边界改由 1px --ash 的 inset 环承担，
+   底回到 --surface-elevated：屏上最亮的东西重新变回「已用掉的量」。 */
 .page-b .band{position:relative;height:12px;flex:none;
-  background:var(--quota-track);border-radius:var(--r-xs);overflow:hidden}
+  background:var(--quota-track-fill);box-shadow:inset 0 0 0 1px var(--quota-track-ring);
+  border-radius:var(--r-xs);overflow:hidden}
 /* 填充用该 agent 的身份色（REVISION 7）。阈值不再把整条改成黄 / 红——那会和身份色
    打架，也会让「这条是谁的」在最需要看清的时候消失。阈值改由百分比数字变色 +
    数字旁的警示图标承担，颜色之外仍有非颜色信号。 */
@@ -225,8 +237,19 @@ body{margin:0;background:var(--canvas);overflow:hidden;
   border-radius:var(--r-xs) 0 0 var(--r-xs);
   box-shadow:var(--quota-notch-w) 0 0 var(--quota-notch);
   transition:width var(--dur-bar) var(--ease-standard)}
-/* 「现在」游标：--canvas，对轨道 3.75、对各档填充 6.81–13.39，不随填充色漂移 */
-.page-b .band .caret{position:absolute;top:0;bottom:0;width:2px;background:var(--quota-notch);margin-left:-1px}
+/* B-2 · 「现在」游标原来也是一道 2px --canvas 挖空，与填充末端的缺口像素级相同——
+   同一个视觉词汇指派了两种语义（缺口 = 数据边界，游标 = 位置基准）。
+   改成沿用 resettick 已经确立的「出头」词汇，但取实心亮线且更高：
+   挖空 = 数据边界，出头亮线 = 位置基准，两者在形状上再不会混。
+   出头必须落在 bandbox 上（band 自己 overflow:hidden，出头会被它剪掉）。
+   色值取 --charcoal 而不是评审建议的 --ink：--ink 就是 accent 的那个 hex，
+   三条带子上常驻三道 accent 白线正是 REVISION 4 把填充从 --ink 降到 --charcoal 时
+   处理过的同一个问题（常驻标记的面积远大于 25px² 的未读点，accent 会失效）。
+   降半档不影响可读：对带外的 --surface 11.2:1，对暗轨道 13:1，
+   而它与缺口的分界从来就不靠颜色，靠的是「出头」这个形状。 */
+.page-b .band .caret{display:none}
+.page-b .bandbox .caret{position:absolute;top:-3px;bottom:-3px;width:2px;
+  background:var(--charcoal);border-radius:1px;margin-left:-1px}
 /* R5-02 · 重置刻度原来是带内一道 --mute 竖线，对 ash 轨道只有 1.95:1，不可辨；
    而且在 97% 那种窗口末期会和「现在」游标挤成一个 4px 的明暗簇（R5-10）。
    改成与游标同源的机制：上下各出头 2px 落到带外的 --surface 上（7.09:1），
@@ -261,7 +284,7 @@ body{margin:0;background:var(--canvas);overflow:hidden;
    加 overflow:hidden 兜底：真实数据里出现更长的时间串时截断，而不是压到图标上。 */
 .rtime{font-family:var(--font-num);font-feature-settings:var(--num-features);
   font-variant-numeric:tabular-nums;font-size:var(--fs-min);color:var(--mute);
-  white-space:nowrap;text-align:right;line-height:1;min-width:0;overflow:hidden}
+  white-space:nowrap;text-align:right;line-height:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .rkind{display:inline-flex;align-items:center;justify-content:center;color:var(--mute)}
 .rkind[data-kind="failed"]{color:var(--danger)}
 .rkind[data-kind="running"]{color:var(--idc);animation:pulse var(--cycle-pulse) var(--ease-standard) infinite}
@@ -302,19 +325,37 @@ body{margin:0;background:var(--canvas);overflow:hidden;
 .page-d .d-head{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-sm);flex:none;height:20px}
 .page-d .d-title{font-size:var(--fs-body-r);font-weight:var(--w-emph);color:var(--ink);
   white-space:nowrap;line-height:1}
-.page-d .d-legend{display:flex;align-items:center;gap:var(--sp-md);
-  font-size:var(--fs-min);color:var(--mute);line-height:1}
-.page-d .d-legend span{display:inline-flex;align-items:center;gap:var(--sp-xs);white-space:nowrap}
-.page-d .d-legend i{width:var(--dot);height:var(--dot);border-radius:var(--r-full);background:var(--idc)}
-/* 数据只有 8 周时格子占不满 464px。左对齐会读成「右边那片是不是没加载出来」，
-   所以整块居中——列数少是数据的事实，不该让版面看起来像坏了。 */
-.page-d .d-grid{display:flex;gap:var(--sp-sm);flex:1;min-height:0;
-  align-items:center;justify-content:center}
-.page-d .d-days{display:grid;grid-auto-rows:var(--cell);row-gap:2px;flex:none;width:26px;
+/* D-4 · 页眉右侧原来挂着三个身份色圆点的图例，而正下方是一张完全按总量分档的
+   中性网格——图例承诺了一个不存在的 encoding，比没有图例更糟。
+   删掉圆点，位置交给「这一格是哪一天」（与 E 页页眉右侧的更新时间同一个槽位、
+   同一个职责：这屏说的是哪个时刻），分档说明用一句话接在标题后面——
+   一个说得清 encoding 的句子，比五个说不清的色块便宜也诚实。
+   三家的实际数值下移到说明行（见 .d-nums 那段的宽度账）。 */
+.page-d .d-hint{flex:1;min-width:0;font-size:var(--fs-min);color:var(--mute);line-height:1;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.page-d .d-date{flex:none;font-family:var(--font-num);font-feature-settings:var(--num-features);
+  font-variant-numeric:tabular-nums;font-size:var(--fs-min);color:var(--ink);
+  white-space:nowrap;line-height:1}
+/* D-1 · 格子尺寸不再写死 13px，由 renderPageD 推出：
+   **宽度永远填满这一行的可用宽**（列宽 = 宽预算 / 周数），
+   **高度取 min(列宽, 高预算 / 7)**，上限 28px。
+   于是 8 周时是 42×18 的横向格（填满宽、填满高），26 周时列宽掉到 11px、
+   高度跟着降成 11px 的方格并纵向居中——密排时自己退化回 GitHub 那种方格，
+   不需要再改第二次。
+   **为什么放弃正方形**：8 列 × 方格要同时填满 353px 的宽，列距会长到 30px，
+   比格子本身还宽，网格结构会散成八条互不相干的竖带（实拍确认过）。
+   方格、填满宽、纵向居中三条在 8 列上不可兼得，舍掉的是方格——
+   这是评审明写「合法的、故意的选择，只要写进笔记」的那一条。
+   回报：单格从 2.08mm² 级的小方块长到 6.7mm × 2.88mm，
+   五档明度阶第一次在 55cm 上有机会分得开（D-2 因此先不动颜色）。 */
+.page-d .d-grid{display:flex;gap:var(--sp-sm);flex:1;min-height:0;align-items:center}
+.page-d .d-days{display:grid;grid-auto-rows:var(--cell-h);row-gap:2px;flex:none;width:26px;
   font-size:var(--fs-min);color:var(--mute)}
-.page-d .d-days span{line-height:var(--cell)}
-.page-d .d-cells{display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,var(--cell));gap:2px;flex:none}
-.page-d .cell{width:var(--cell);height:var(--cell);border-radius:2px;border:0;padding:0;
+.page-d .d-days span{line-height:var(--cell-h)}
+.page-d .d-cells{display:grid;grid-auto-flow:column;grid-auto-columns:var(--cell-w);
+  grid-template-rows:repeat(7,var(--cell-h));row-gap:2px;column-gap:2px;
+  flex:1;min-width:0;justify-content:space-between}
+.page-d .cell{width:var(--cell-w);height:var(--cell-h);border-radius:2px;border:0;padding:0;
   background:var(--heat-0);cursor:default}
 .page-d .cell[data-l="1"]{background:var(--heat-1)}
 .page-d .cell[data-l="2"]{background:var(--heat-2)}
@@ -324,10 +365,20 @@ body{margin:0;background:var(--canvas);overflow:hidden;
 .page-d .cell:focus-visible{outline:none;box-shadow:0 0 0 2px var(--accent)}
 .page-d .d-tip{flex:none;height:20px;font-size:var(--fs-min);color:var(--body);line-height:20px;
   display:flex;align-items:center;justify-content:flex-start;gap:var(--sp-sm);overflow:hidden;white-space:nowrap}
-.page-d .d-tip b{font-weight:var(--w-emph);color:var(--ink)}
-.page-d .d-tip .dim{color:var(--mute);overflow:hidden;text-overflow:ellipsis}
-.page-d .d-scale{display:flex;align-items:center;gap:var(--sp-xs);flex:none;margin-inline-start:var(--sp-sm)}
-.page-d .d-scale i{width:8px;height:8px;border-radius:2px;display:block}
+/* D-3 · 说明行原来是「日期 + 三家数值 + 5 个色阶方块」挤在一个定长裁切盒里，
+   被牺牲的永远是集合的尾巴——第三家 agent 整个消失，而这行是这块屏上唯一的
+   精确值出口（面板没有指针，hover 永远不会发生，它就是 tooltip 本身）。
+   色阶方块删掉（5 个 1.3mm 的灰块在 55cm 外只是噪点，又没有「少 / 多」锚点，
+   解释不了任何东西），日期上移到页眉，这一行整条让给三家的数值。
+   宽度账（403 画布，行宽 387）：三家带各自单位实测 323–358px，
+   而页眉光是标题就要 127px —— 数值放进页眉必然再截一次，所以两者换了个位置：
+   页眉说「这是什么、哪一天」，这一行说「各是多少」，一家都不少。 */
+.page-d .d-nums{display:flex;align-items:baseline;gap:var(--sp-md);min-width:0;
+  font-size:var(--fs-min);color:var(--mute);line-height:1;white-space:nowrap}
+.page-d .d-nums span{white-space:nowrap}
+.page-d .d-nums b{font-weight:var(--w-emph);color:var(--ink);
+  font-family:var(--font-num);font-feature-settings:var(--num-features);
+  font-variant-numeric:tabular-nums}
 
 /* ==========================================================================
    E 页 · 今日 AI 大事（AIHOT）—— 这一页是阅读不是扫视，五条等权
@@ -340,7 +391,12 @@ body{margin:0;background:var(--canvas);overflow:hidden;
 .page-e .e-list{flex:1;min-height:0;display:flex;flex-direction:column;gap:var(--sp-xs);overflow:hidden}
 /* 第三列写成 minmax(0,34%) 而不是 auto：auto 列按 max-content 定宽，
    遇到超长来源名会把整个网格撑出画布（403 宽下必现，edge 态更明显）。 */
-.page-e .e-item{flex:1;min-height:0;display:grid;grid-template-columns:18px minmax(0,1fr) minmax(0,34%);
+/* E-1 · 第三列从 34% 提到 40%：剥掉前缀之后中文来源名普遍 ≤5 个全角字（70px），
+   但拉丁名不是——「Gary Marcus」85px、「Hacker News」88px，34% 只给到 67px，
+   于是屏上是「Gary M…」，和「公众号：…」一样读不出是谁。40% 给到 88px，
+   今天三条真实来源全数完整；代价是标题列 221→198px，而标题本来就按行数省略，
+   少 10% 只是省略号早一点，来源少一半却是署名消失。 */
+.page-e .e-item{flex:1;min-height:0;display:grid;grid-template-columns:18px minmax(0,1fr) minmax(0,40%);
   column-gap:var(--sp-sm);align-items:center}
 .page-e .e-no{font-family:var(--font-num);font-feature-settings:var(--num-features);
   font-variant-numeric:tabular-nums;font-size:var(--fs-min);color:var(--mute);text-align:right;line-height:1}

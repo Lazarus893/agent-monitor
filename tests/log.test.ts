@@ -5,11 +5,13 @@
  * 不可能每次都等；这里把阈值调小，把三个档位的搬家顺序钉死。
  */
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DEFAULT_LOG_DIR, LOG_NAME, MAX_BYTES, logDir, rotate, startLogging } from '../src/main/log.js'
+import {
+  DEFAULT_LOG_DIR, LOG_NAME, MAX_BYTES, logDir, makeCrashHandlers, rotate, startLogging
+} from '../src/main/log.js'
 
 const dir = (): string => mkdtempSync(join(tmpdir(), 'amlog-'))
 const nth = (d: string, n: number): string => join(d, `main.${n}.log`)
@@ -114,5 +116,82 @@ describe('console tee', () => {
     expect(() => console.log('仍然不该抛')).not.toThrow()
     logger.restore()
     restore = null
+  })
+})
+
+/* ==========================================================================
+   两段式兜底（设计终审收尾第 1 条）。
+   启动期的「不崩」会让 app 静静挂住 —— 没有窗口、没有报错、也不退出；
+   实测踩过一次（打包版跑 selftest，executeJavaScript reject 之后挂了四分钟）。
+   ========================================================================== */
+
+describe('崩溃兜底分两段', () => {
+  const spy = (): { fatal: (c: number) => void; codes: number[] } => {
+    const codes: number[] = []
+    return { fatal: c => codes.push(c), codes }
+  }
+
+  it('窗口就绪之前：uncaughtException → 记 ERROR 并 exit(1)', () => {
+    const s = spy()
+    const h = makeCrashHandlers(s.fatal)
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    h.onUncaught(new Error('起不来'))
+    expect(s.codes).toEqual([1])
+    expect(err.mock.calls.flat().join(' ')).toContain('起不来')
+    expect(err.mock.calls.flat().join(' ')).toContain('[fatal]')
+    err.mockRestore()
+  })
+
+  it('窗口就绪之前：unhandledRejection 同样 exit(1)', () => {
+    const s = spy()
+    const h = makeCrashHandlers(s.fatal)
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    h.onRejection(new Error('promise 没人接'))
+    expect(s.codes).toEqual([1])
+    err.mockRestore()
+  })
+
+  it('markReady 之后：只记日志，绝不退出', () => {
+    const s = spy()
+    const h = makeCrashHandlers(s.fatal)
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    h.markReady()
+    h.onUncaught(new Error('某个 collector 炸了'))
+    h.onRejection(new Error('某个 fetch 没 catch'))
+    expect(s.codes).toEqual([])
+    const out = err.mock.calls.flat().join(' ')
+    expect(out).toContain('某个 collector 炸了')
+    expect(out).toContain('某个 fetch 没 catch')
+    expect(out).not.toContain('[fatal]')
+    err.mockRestore()
+  })
+
+  it('ready() 如实反映当前处在哪一段', () => {
+    const h = makeCrashHandlers(() => {})
+    expect(h.ready()).toBe(false)
+    h.markReady()
+    expect(h.ready()).toBe(true)
+  })
+
+  it('非 Error 的抛出物也记得下来，不会变成 [object Object]', () => {
+    const s = spy()
+    const h = makeCrashHandlers(s.fatal)
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    h.markReady()
+    h.onRejection('一个字符串')
+    h.onRejection({ code: 'ENOENT' })
+    const out = err.mock.calls.flat().join(' ')
+    expect(out).toContain('一个字符串')
+    expect(out).toContain('ENOENT')
+    err.mockRestore()
+  })
+
+  it('主进程把 markReady 挂在首帧那一刻（did-finish-load）', () => {
+    const src = readFileSync(join(process.cwd(), 'src/main/index.ts'), 'utf8')
+    expect(src).toMatch(/installCrashGuards\(code => app\.exit\(code\)\)/)
+    const load = src.indexOf("did-finish-load")
+    const mark = src.indexOf('crash.markReady()')
+    expect(load).toBeGreaterThan(-1)
+    expect(mark).toBeGreaterThan(load)
   })
 })

@@ -37,7 +37,10 @@ const DEBUG = process.env.MONITOR_DEBUG === '1' && !SHOOT
 const LOG_DIR = process.env.MONITOR_LOG_DIR?.trim()
   || (SELFTEST || SHOOT ? join(tmpdir(), 'agent-monitor-selftest', 'logs') : logDir())
 startLogging(LOG_DIR)
-installCrashGuards()
+/* 启动期的致命错误要**退出**，不能吞（设计终审收尾第 1 条）。
+   `app.exit` 而不是 `app.quit`：quit 会走 will-quit 那一串 handler，
+   而此刻的前提正是「启动没走完」，那些 handler 未必能安全跑。 */
+const crash = installCrashGuards(code => app.exit(code))
 
 if (!app.requestSingleInstanceLock()) {
   console.log('[app] 已有一个实例在跑，本次退出')
@@ -126,6 +129,8 @@ async function main(): Promise<void> {
     mw.win.webContents.send(CH.state, state)
   }
   mw.win.webContents.on('did-finish-load', () => {
+    // 首帧画出来了：从这里起，未接住的异常只记日志、不再退出
+    crash.markReady()
     rendererReady = true
     push(store.get())
     // 静音是个偏好、不在 state 里，所以每次加载完都补推一次（崩溃重载后也不会丢）

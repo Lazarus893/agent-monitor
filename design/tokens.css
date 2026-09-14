@@ -112,6 +112,16 @@
      --ash is 3.64:1 on --surface and 3.75:1 on --canvas. The fills that ride on
      these tracks move to --ink so the fill edge keeps a 4.86:1 boundary. */
   --quota-track:       var(--ash);
+  /* REVISION 8 (polish-pass B-1): REVISION 2 raised the track to a SOLID --ash
+     slab to clear 1.4.11. Measured on the shipped panel that slab is the
+     brightest area on the whole screen — and what it encodes is "the part you
+     did NOT use". Figure and ground are inverted: a 0% band reads as a full one.
+     1.4.11 asks for a discernible component BOUNDARY, not a 3:1 solid interior,
+     so the boundary moves to a 1px inset ring and the interior falls back to
+     ground. Ring is still --ash (3.64:1 on --surface, 3.75:1 on --canvas);
+     the brightest thing in the band is once again the identity-coloured fill. */
+  --quota-track-fill:  var(--surface-elevated);
+  --quota-track-ring:  var(--ash);
   /* REVISION 4 (R3-03 / R4-03): the fill was --ink — the same hex as --accent.
      Measured in V3's populated state the two fills covered 1768 px² while the
      unread dot covered 25 px²: a 70:1 ratio, i.e. the brightest, largest shape

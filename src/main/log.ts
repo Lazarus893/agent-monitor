@@ -116,18 +116,78 @@ export function startLogging(dir = logDir()): Logger {
 }
 
 /**
- * 全局兜底（简报 §4）：任何没被 collector 的 try/catch 接住的异常都只记日志，
- * 绝不让主进程退出。面板宁可某一块数据停更，也不该整个消失。
+ * 全局兜底（简报 §4 + 设计终审收尾第 1 条）。
  *
- * 没有例外 —— 包括退出途中那些 `EPIPE` / `ERR_IPC_CHANNEL_CLOSED` 噪音，
- * 一律只记一行。判断「哪些异常是致命的」需要的信息这里没有，
- * 而误判成致命的代价（面板整块消失、还没人发现）远大于多记几行。
+ * 分两个阶段，**因为「不崩」在两个阶段里是两件不同的事**：
+ *
+ * · **窗口就绪之前**（启动期）：任何没被接住的异常都是致命的。它意味着面板根本没起来，
+ *   而吞掉它的后果是进程活着、托盘可能也没建、屏上什么都没有 —— app 于是**静静地挂住**，
+ *   没有窗口、没有报错、也不退出，用户以为它在跑。
+ *   实测踩过一次：打包版跑 selftest 时 `window.monitor.dev` 不存在（打包后按设计被摇掉），
+ *   `executeJavaScript` reject → `main()` 的 promise reject → 被这里吞掉 → 挂了四分钟没动静。
+ *   所以启动期一律记 ERROR 再 `exit(1)`：起不来就干脆利落地起不来。
+ *
+ * · **窗口就绪之后**（运行期）：面板已经在屏上了，这时候的目标反过来 —— 宁可某一块数据停更，
+ *   也不该整个消失。一律只记一行。
+ *
+ * `fatal` 可注入：主进程传 `app.exit`，单测传一个 spy。
  */
-export function installCrashGuards(): void {
-  process.on('uncaughtException', err => {
-    console.error(`[uncaught] ${err instanceof Error ? err.stack ?? err.message : String(err)}`)
-  })
-  process.on('unhandledRejection', reason => {
-    console.error(`[unhandled] ${reason instanceof Error ? reason.stack ?? reason.message : String(reason)}`)
-  })
+
+export type CrashHandlers = {
+  onUncaught(err: unknown): void
+  onRejection(reason: unknown): void
+  /** 窗口已经画出第一帧 —— 从这里开始转成「吞掉不崩」 */
+  markReady(): void
+  ready(): boolean
+}
+
+/**
+ * 把抛出来的东西变成一行能查的字。
+ *
+ * 非 Error 的抛出物（`throw {code:'ENOENT'}`、被 reject 的 POJO）用 `String()` 会变成
+ * `[object Object]` —— 等于什么都没记。这里退一步做**浅层** JSON，并截到 200 字。
+ *
+ * 这不违反本文件「不做深度序列化」那条纪律：那条管的是 console.* 的任意入参
+ * （密钥有一天会从那里溜进日志）。这里处理的是一个**抛出物**，不是业务数据，
+ * 而且只取一层、还截长度 —— 完整的凭据结构进不来，最坏也只是半个字段名。
+ */
+const MAX_THROWN = 200
+const describe = (e: unknown): string => {
+  if (e instanceof Error) return e.stack ?? e.message
+  const s = String(e)
+  if (s !== '[object Object]') return s
+  try {
+    return JSON.stringify(e, Object.keys(e as object).slice(0, 8)).slice(0, MAX_THROWN)
+  } catch {
+    return s
+  }
+}
+
+/**
+ * 两个 handler 的**纯逻辑**，不碰 `process`。
+ * 抽出来是为了能测：直接挂到 `process` 上的话，单测里一发 uncaughtException
+ * 就会和 vitest 自己的处理打架。
+ */
+export function makeCrashHandlers(fatal: (code: number) => void): CrashHandlers {
+  let ready = false
+  const handle = (tag: string, e: unknown): void => {
+    console.error(`${tag} ${describe(e)}`)
+    if (ready) return
+    console.error('[fatal] 窗口还没就绪就出错，退出（exit 1）——起不来就别装作在跑')
+    fatal(1)
+  }
+  return {
+    onUncaught: e => handle('[uncaught]', e),
+    onRejection: e => handle('[unhandled]', e),
+    markReady: () => { ready = true },
+    ready: () => ready
+  }
+}
+
+/** 把上面两个 handler 挂到 process 上。返回的 markReady 由主进程在首帧之后调。 */
+export function installCrashGuards(fatal: (code: number) => void = c => process.exit(c)): CrashHandlers {
+  const h = makeCrashHandlers(fatal)
+  process.on('uncaughtException', err => h.onUncaught(err))
+  process.on('unhandledRejection', reason => h.onRejection(reason))
+  return h
 }

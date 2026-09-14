@@ -37,7 +37,15 @@ const SPACING_EXCEPTIONS = ['6px paddingBottom on .'];   // 与 tokens.css §6 �
     if (!stage.includes(sel)) fail.push(`STAGE 段缺 ${sel}（漏一页就是漏移植）`);
   if (!stage.includes('.page-e .e-time{flex:none')) fail.push('STAGE 段缺 .e-time{flex:none（时间列的命就在这半条）');
   if (stage.includes('.harness')) fail.push('STAGE 段混进了 .harness（工具样式不该被移植）');
-  console.log('移植契约:', fail.length ? fail : `ok（3 个 style 块，STAGE 段 ${stage.length} 字节）`);
+  // 第一个 style 块是 design/tokens.css 的内联副本。它本来只靠「构建步骤逐字拼入」这句
+  // 注释守着，而这轮我在 tokens.css 里加了两个 token、忘了同步副本：
+  // 引用一个不存在的变量 → 整条声明在计算时作废 → B 页轨道连同描边一起变透明，
+  // 而 196 格断言全绿（没有任何一条问「轨道还在不在」）。这是第六次同型。
+  // 副本与真源现在逐字比对，漂移先红在这里。
+  const tokens = fs.readFileSync(new URL('./tokens.css', import.meta.url), 'utf8');
+  if (!(blocks[0] || '').includes(tokens.trim()))
+    fail.push('第一个 style 块与 design/tokens.css 不再逐字相同（内联副本漂移）');
+  console.log('移植契约:', fail.length ? fail : `ok（3 个 style 块，STAGE 段 ${stage.length} 字节，token 副本与真源一致）`);
   if (fail.length) process.exitCode = 1;
 }
 
@@ -88,24 +96,34 @@ for (const cv of CANVASES) {
 
       // 1 · 画布边界。待命页停在画布左外侧是刻意的，不查；4 页 × 7 态的循环
       //     保证每一页都会在「它是当前页」那一格被完整检查。
-      // 「越出画布」只对没有裁切祖先的元素成立。省略号截断的内联 span 的 rect
-      // 本来就会超出父盒，但它被 overflow:hidden 的祖先夹住，屏上不会露出去——
-      // 把它报成越界是口径错，不是缺陷（同一类问题这已经是第三次了）。
-      const clipped = n => {
+      // A-1b · 这里原来对「有裁切祖先的元素」一律豁免（clipped() → continue）。
+      // 那个口径对省略号截断是对的，对硬裁切是错的，而两者在 rect 上不可区分——
+      // 于是「后重置」被齐口切成「后重」这种缺陷对整套断言完全隐形。
+      // 豁免条件收紧：确实被裁，且裁切策略是完整的（自己或裁切祖先声明了 ellipsis），
+      // 或者它根本不承载文本（纯图形不存在「残缺字形」这回事）。其余报 HARDCLIP。
+      const clipAncestor = n => {
         for (let a = n.parentElement; a && a !== stage.parentElement; a = a.parentElement) {
           const o = getComputedStyle(a);
-          if (o.overflowX !== 'visible' || o.overflowY !== 'visible') return true;
+          if (o.overflowX !== 'visible' || o.overflowY !== 'visible') return a;
         }
-        return false;
+        return null;
       };
       for (const n of stage.querySelectorAll('*')) {
         if (n.closest('.sr') || n.closest('.page[data-on="0"]')) continue;
         const b = n.getBoundingClientRect();
         if (b.width === 0 && b.height === 0) continue;
         if (b.left < sb.left - 1 || b.right > sb.right + 1 || b.top < sb.top - 1 || b.bottom > sb.bottom + 1) {
-          if (clipped(n)) continue;
-          out.push(`OUTSIDE ${(typeof n.className === 'string' && n.className) || n.tagName}` +
-                   ` < ${(n.parentElement && n.parentElement.className) || '?'}`);
+          const name = `${(typeof n.className === 'string' && n.className) || n.tagName}` +
+                       ` < ${(n.parentElement && n.parentElement.className) || '?'}`;
+          const anc = clipAncestor(n);
+          if (anc) {
+            if (!(n.textContent || '').trim()) continue;                       // 纯图形，裁掉无残字
+            if (getComputedStyle(n).textOverflow === 'ellipsis' ||
+                getComputedStyle(anc).textOverflow === 'ellipsis') continue;    // 省略号截断，合法
+            out.push(`HARDCLIP ${name}（被裁却没有 text-overflow，屏上是残缺字形不是省略信号）`);
+            continue;
+          }
+          out.push(`OUTSIDE ${name}`);
         }
       }
       // 2 · 裁切 / 溢出
@@ -137,9 +155,15 @@ for (const cv of CANVASES) {
         if (f < FONT_FLOOR) out.push(`TINY ${f}px "${n.textContent.trim().slice(0, 14)}"`);
       }
       // 4 · 轨道 / 填充 / 缺口对比度
+      // B-1 · 轨道不再是实心 ash 板，边界改由 1px --ash 的 inset 环承担。
+      //       1.4.11 要查的因此是环对背景，不是轨道内部对背景——内部现在是 ground，
+      //       它本来就该退到背景里去（那正是这条修复的目的）。
       const tracks = [];
-      stage.querySelectorAll('.bar,.band').forEach(n =>
-        tracks.push(['track-vs-bg', parse(getComputedStyle(n).backgroundColor), bgOf(n.parentElement)]));
+      stage.querySelectorAll('.bar,.band').forEach(n => {
+        const ring = parse(getComputedStyle(n).boxShadow.match(/rgba?\([^)]+\)/)?.[0] || '');
+        if (ring.length) tracks.push(['track-ring-vs-bg', ring, bgOf(n.parentElement)]);
+        tracks.push(['track-inner-vs-bg', parse(getComputedStyle(n).backgroundColor), bgOf(n.parentElement)]);
+      });
       stage.querySelectorAll('.bar>i,.band .used').forEach(n => {
         const host = n.closest('.bar,.band');
         const track = parse(getComputedStyle(host).backgroundColor);
@@ -149,17 +173,20 @@ for (const cv of CANVASES) {
         const notch = parse(getComputedStyle(n).boxShadow.match(/rgba?\([^)]+\)/)?.[0] || '');
         if (notch.length) { tracks.push([`notch-vs-fill/${lvl}`, notch, fill]); tracks.push([`notch-vs-track/${lvl}`, notch, track]); }
       });
-      stage.querySelectorAll('.band .caret').forEach(n => {
-        const track = parse(getComputedStyle(n.closest('.band')).backgroundColor);
-        tracks.push(['caret-vs-track', parse(getComputedStyle(n).backgroundColor), track]);
-      });
+      // B-2 · 游标从带内的挖空改成带外出头的 --ink 实心线，所以它现在贴的是
+      //       带子周围那块面（和 resettick 同族），量的也该是对那块面的对比度。
+      stage.querySelectorAll('.bandbox .caret').forEach(n =>
+        tracks.push(['caret-vs-bg', parse(getComputedStyle(n).backgroundColor), bgOf(n.parentElement)]));
       const seen = new Set(); const trackReport = [];
       for (const [name, fg, bg] of tracks) {
         if (!fg.length) continue;
         const rr = ratio(over(fg, bg), bg);
         const key = name + '|' + over(fg, bg).map(Math.round).join(',');
         if (!seen.has(key)) { seen.add(key); trackReport.push([name, +rr.toFixed(2)]); }
-        if (name.startsWith('fill-vs-track')) continue;   // 边界由缺口承担，语义色不动
+        // B-1 之后轨道内部就是 ground，它对背景的低对比度是目的不是缺陷；
+        // 缺口对轨道同理——轨道变暗之后那道 --canvas 缺口在轨道上消失是对的，
+        // 它的活（分开填充与轨道）已经由填充自己的色差接手（fill-vs-track 见下）。
+        if (name === 'track-inner-vs-bg' || name.startsWith('notch-vs-track')) continue;
         if (rr < 3) out.push(`TRACK<3:1 ${name} ${rr.toFixed(2)}:1`);
       }
       // 4b · R5-05 · 间距栅格：扫描全部计算出的 gap / padding / margin
@@ -216,6 +243,44 @@ for (const cv of CANVASES) {
       let heatCells = -1;
       if (live && live.dataset.p === 'd') heatCells = live.querySelectorAll('.cell[data-date]').length;
 
+      // 4g · A-1b · 「裁切策略必须完整」：裁了就得省略。这是内容级断言，口径落在
+      //      「读者看到的是省略信号还是残缺字形」上，而不是「rect 越不越界」。
+      //      承载文本的叶子：溢出则必须解析出 text-overflow:ellipsis。
+      //      flex / grid 容器：容器上的 ellipsis 不通电（R5-08 的老教训），
+      //      所以对它们的要求直接是「不许溢出」——该收缩的是里面那个可变长的项。
+      const CLIP_TEXT = ['.tile-foot .word', '.rtime', '.b-cd', '.e-src', '.rtitle',
+                         '.b-verdict', '.b-name span.t', '.d-hint', '.b-note'];
+      const CLIP_BOX  = ['.tile-foot', '.b-head', '.d-head', '.d-nums', '.d-tip', '.e-meta'];
+      const hardClip = [];
+      if (live) {
+        for (const sel of CLIP_TEXT) for (const n of live.querySelectorAll(sel))
+          if (n.scrollWidth > n.clientWidth + 1 && getComputedStyle(n).textOverflow !== 'ellipsis')
+            hardClip.push(`${sel} 溢出 ${n.scrollWidth}>${n.clientWidth} 却无 ellipsis`);
+        for (const sel of CLIP_BOX) for (const n of live.querySelectorAll(sel))
+          if (n.scrollWidth > n.clientWidth + 1)
+            hardClip.push(`${sel} 容器溢出 ${n.scrollWidth}>${n.clientWidth}（容器上的 ellipsis 不通电）`);
+      }
+
+      // 4h · D-3 / D-4 · 页眉的三家数值是这块屏唯一的精确值出口（面板没有指针，
+      //      hover 永远不会发生）。三家一个都不许缺——缺席要显式渲染成「—」。
+      let dNums = '';
+      if (live && live.dataset.p === 'd' && live.querySelector('.d-nums'))
+        dNums = live.querySelector('.d-nums').textContent.replace(/\s+/g, ' ').trim();
+
+      // 4i · E-1 · 「允许省略，不允许省略到只剩前缀」。两条口径：
+      //      ① 剥完前缀的来源名里不该再出现冒号（出现即说明前缀没剥）；
+      //      ② 省略比例不得超过 1.6 倍——超过就等于屏上那几个字读不出是谁。
+      //      edge 态的来源是故意造的超长串（用来撑破这一列），只查 ①。
+      const srcBad = [];
+      if (live && live.dataset.p === 'e') {
+        for (const n of live.querySelectorAll('.e-src')) {
+          const txt = (n.textContent || '').trim();
+          if (/[：:]/.test(txt)) srcBad.push(`来源仍带前缀冒号「${txt}」`);
+          if (n.clientWidth > 0 && n.scrollWidth > n.clientWidth * 1.6)
+            srcBad.push(`来源省略过半「${txt}」${n.scrollWidth}>${Math.round(n.clientWidth * 1.6)}`);
+        }
+      }
+
       // 5 · accent：按计算颜色全量扫描，只数当前可见页
       const ACCENT = 'rgb(244, 244, 246)';
       const accentEls = [];
@@ -232,6 +297,7 @@ for (const cv of CANVASES) {
       }
       return {
         problems: out, accentEls, accent: accentEls.length, minFont, newsNoTime, fillWrong, heatCells,
+        hardClip, dNums, srcBad,
         offScale: [...new Set(offScale)], focusableHidden,
         headings: stage.querySelectorAll('h1,h2,h3,[role=heading]').length,
         statusEls: stage.querySelectorAll('[role="status"]').length,
@@ -249,6 +315,14 @@ for (const cv of CANVASES) {
     if (r.fillWrong) r.problems.push(`B 页填充色: ${r.fillWrong}`);
     if (p === 'd' && ['populated','edge','attention','running'].includes(s) && r.heatCells === 0)
       r.problems.push('D 页该出图的状态下一个格子都没有');
+    // A-1b · 裁切策略不完整（裁了不省略 / 容器硬溢出）
+    for (const h of r.hardClip) r.problems.push(`CLIPSTRATEGY ${h}`);
+    // D-3 / D-4 · 页眉的三家数值一个都不许缺
+    if (p === 'd' && ['populated','edge','attention','running'].includes(s))
+      for (const who of ['Codex', 'Claude', 'ZCode'])
+        if (!r.dNums.includes(who)) r.problems.push(`D 页页眉缺 ${who}（三家里少一家: ${r.dNums}）`);
+    // E-1 · 来源不许省略到只剩前缀
+    for (const b of r.srcBad) if (!(s === 'edge' && b.startsWith('来源省略过半'))) r.problems.push(`E-SRC ${b}`);
     // R5-01 · inert 断言
     if (r.focusableHidden > 0) r.problems.push(`INERT 非当前页仍有 ${r.focusableHidden} 个可聚焦元素`);
     // R5-05 · 例外清单断言：实测的 off-scale 集合必须等于声明的例外集合
@@ -266,7 +340,11 @@ console.log(`\n格子检查：${okCount} / ${CANVASES.length * PAGES.length * ST
             `（${CANVASES.length} 画布 × ${PAGES.length} 页 × ${STATES.length} 态）`);
 
 console.log('\n轨道 / 填充 / 缺口对比度:');
-for (const [n, v] of trackReportOnce || []) console.log(`  ${n.padEnd(22)} ${v}:1 ${v >= 3 ? 'PASS' : (n.startsWith('fill-vs-track') ? '(参考，边界由缺口承担)' : 'FAIL')}`);
+// B-1 之后 1.4.11 查的是 track-ring（边界），轨道内部与缺口对轨道是「本来就该低」的两项：
+// 内部退回 ground 正是这条修复的目的；缺口在暗轨道上消失也无所谓——
+// 分开填充与轨道的活已经由填充自己的色差接手（fill-vs-track 从 1.71 涨到 6.73–14.04）。
+const SOFT = n => n === 'track-inner-vs-bg' || n.startsWith('notch-vs-track');
+for (const [n, v] of trackReportOnce || []) console.log(`  ${n.padEnd(22)} ${v}:1 ${v >= 3 ? 'PASS' : (SOFT(n) ? '(按设计低：边界已由 ring / 填充色差承担)' : 'FAIL')}`);
 
 // ---------------- 截图：panelX 1.0 作对照 + 1.19 实机系数（-x119） ----------------
 // m3-executor 发现交付截图里混进过自检注入的合成事件行。我这边靠「截图在所有

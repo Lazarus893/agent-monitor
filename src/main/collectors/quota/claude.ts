@@ -63,8 +63,24 @@ export function parseRateLimits(raw: unknown): QuotaWindow[] {
   }
   push('five_hour', '5h')
   push('seven_day', '7d')
+
+  /* Claude Code 在 5h 窗**没有任何使用记录**时会直接省略 `five_hour` 这个键
+     （实测 2026-09-15 00:07 的 claude-ratelimits.json 就只有 seven_day）。
+     映射本身一直是按键名走的，问题在下游：渲染层按**位置**取
+     `windows[0]` 当 5h、`windows[1]` 当 7d，于是只剩一个窗口时，
+     7 天窗的 10% / 107h55m 被 A、B 两页当成 5h 显示 —— 屏上是个看不出错的错数。
+
+     所以缺 five_hour 时补一个**显式的占位窗**：0%、`resetsAt` 空串。
+     空串是「没有重置时刻」的约定，渲染层据此显示「—」而不是算出 NaN。
+     只在确实采到了 7d 的时候补 —— 一个窗口都没有的时候该走的是 notice，不是 0%。 */
+  if (windows.length === 1 && windows[0]!.label === '7d') {
+    windows.unshift({ label: '5h', usedPercent: 0, resetsAt: '' })
+  }
   return windows
 }
+
+/** 这个窗口是「本窗口无使用记录」的占位（没有重置时刻），不是一个真的 0% */
+export const isPlaceholder = (w: QuotaWindow): boolean => !w.resetsAt
 
 /** tee 写的那个包装里的写入时间；没有就退回文件本身没有时间可用 */
 export function parseWrittenAt(raw: unknown): string | null {

@@ -243,6 +243,16 @@ accent
      --ash is 3.64:1 on --surface and 3.75:1 on --canvas. The fills that ride on
      these tracks move to --ink so the fill edge keeps a 4.86:1 boundary. */
   --quota-track:       var(--ash);
+  /* REVISION 8 (polish-pass B-1): REVISION 2 raised the track to a SOLID --ash
+     slab to clear 1.4.11. Measured on the shipped panel that slab is the
+     brightest area on the whole screen — and what it encodes is "the part you
+     did NOT use". Figure and ground are inverted: a 0% band reads as a full one.
+     1.4.11 asks for a discernible component BOUNDARY, not a 3:1 solid interior,
+     so the boundary moves to a 1px inset ring and the interior falls back to
+     ground. Ring is still --ash (3.64:1 on --surface, 3.75:1 on --canvas);
+     the brightest thing in the band is once again the identity-coloured fill. */
+  --quota-track-fill:  var(--surface-elevated);
+  --quota-track-ring:  var(--ash);
   /* REVISION 4 (R3-03 / R4-03): the fill was --ink — the same hex as --accent.
      Measured in V3's populated state the two fills covered 1768 px² while the
      unread dot covered 25 px²: a 70:1 ratio, i.e. the brightest, largest shape
@@ -645,8 +655,10 @@ html[data-pure="1"] .pure-hint{position:fixed;left:50%;bottom:24px;transform:tra
 [data-level="warn"]   .num,[data-level="warn"]   .unit{color:var(--quota-warn)}
 [data-level="danger"] .num,[data-level="danger"] .unit{color:var(--quota-danger)}
 
-/* 轨道 --ash 3.64:1；填充 --charcoal 3.57:1；末端一道 2px --canvas 缺口 */
-.bar{background:var(--quota-track);border-radius:var(--r-full);overflow:hidden;flex:none}
+/* B-1 · 轨道 = --surface-elevated 底 + 1px --ash inset 环（环 3.64:1，1.4.11 照过）；
+   填充 --charcoal 3.57:1；末端一道 2px --canvas 缺口 */
+.bar{background:var(--quota-track-fill);box-shadow:inset 0 0 0 1px var(--quota-track-ring);
+  border-radius:var(--r-full);overflow:hidden;flex:none}
 .bar>i{display:block;height:100%;background:var(--fill, var(--quota-fill));border-radius:var(--r-full);
   box-shadow:var(--quota-notch-w) 0 0 var(--quota-notch);
   transition:width var(--dur-bar) var(--ease-standard)}
@@ -682,10 +694,14 @@ html[data-pure="1"] .pure-hint{position:fixed;left:50%;bottom:24px;transform:tra
 .page-a .a-nums .unit{font-size:var(--fs-unit-r)}
 /* 倒计时 18px（R4-06 点名要提上来），状态词 14px —— 两者分档才在 123px 的瓦片
    内宽里放得下，也让「数字」与「说明」不再是同一个视觉层 */
+/* A-1b · 裁切策略只写了一半：有 overflow:hidden 没有 text-overflow，溢出就成了齐口
+   硬切（屏上留下残缺字形，读者得不到「这里被切掉了」的信号）。
+   注意 foot 本身是 flex —— flex 容器上的 text-overflow 不通电（同 R5-08 的教训），
+   所以省略号必须落在承载文本的那个 flex item 上：.cd 定长不收缩，.word 可收缩并省略。 */
 .page-a .tile-foot{flex:none;height:24px;display:flex;align-items:baseline;gap:var(--sp-xs);
-  color:var(--mute);white-space:nowrap;overflow:hidden;line-height:1.2}
-.page-a .tile-foot .cd{font-size:var(--fs-cd-a);font-weight:var(--w-emph)}
-.page-a .tile-foot .word{font-size:var(--fs-min)}
+  color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2}
+.page-a .tile-foot .cd{font-size:var(--fs-cd-a);font-weight:var(--w-emph);flex:none}
+.page-a .tile-foot .word{font-size:var(--fs-min);min-width:0;overflow:hidden;text-overflow:ellipsis}
 .page-a .tile-foot svg{align-self:center}
 .page-a .tile-foot svg{color:var(--mute);flex:none}
 .page-a .tile-foot[data-level="warn"]   svg{color:var(--quota-warn)}
@@ -719,9 +735,15 @@ html[data-pure="1"] .pure-hint{position:fixed;left:50%;bottom:24px;transform:tra
 .page-b [data-level="warn"]   .b-pc{color:var(--quota-warn)}
 .page-b [data-level="danger"] .b-pc{color:var(--quota-danger)}
 .page-b .b-sec{font-size:var(--fs-body-r);color:var(--mute);flex:none}
-.page-b .b-cd{font-size:var(--fs-min);color:var(--mute);flex:none;width:48px;text-align:right}
+.page-b .b-cd{font-size:var(--fs-min);color:var(--mute);flex:none;width:48px;text-align:right;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* B-1 · 轨道原来是 --ash 实心板：全屏最亮的一块，承载的却是「没用掉的部分」——
+   figure/ground 反过来了（0% 的那条读成「满的」）。WCAG 1.4.11 要的是组件边界
+   可辨识，不是内部实心填到 3:1，所以边界改由 1px --ash 的 inset 环承担，
+   底回到 --surface-elevated：屏上最亮的东西重新变回「已用掉的量」。 */
 .page-b .band{position:relative;height:12px;flex:none;
-  background:var(--quota-track);border-radius:var(--r-xs);overflow:hidden}
+  background:var(--quota-track-fill);box-shadow:inset 0 0 0 1px var(--quota-track-ring);
+  border-radius:var(--r-xs);overflow:hidden}
 /* 填充用该 agent 的身份色（REVISION 7）。阈值不再把整条改成黄 / 红——那会和身份色
    打架，也会让「这条是谁的」在最需要看清的时候消失。阈值改由百分比数字变色 +
    数字旁的警示图标承担，颜色之外仍有非颜色信号。 */
@@ -729,8 +751,19 @@ html[data-pure="1"] .pure-hint{position:fixed;left:50%;bottom:24px;transform:tra
   border-radius:var(--r-xs) 0 0 var(--r-xs);
   box-shadow:var(--quota-notch-w) 0 0 var(--quota-notch);
   transition:width var(--dur-bar) var(--ease-standard)}
-/* 「现在」游标：--canvas，对轨道 3.75、对各档填充 6.81–13.39，不随填充色漂移 */
-.page-b .band .caret{position:absolute;top:0;bottom:0;width:2px;background:var(--quota-notch);margin-left:-1px}
+/* B-2 · 「现在」游标原来也是一道 2px --canvas 挖空，与填充末端的缺口像素级相同——
+   同一个视觉词汇指派了两种语义（缺口 = 数据边界，游标 = 位置基准）。
+   改成沿用 resettick 已经确立的「出头」词汇，但取实心亮线且更高：
+   挖空 = 数据边界，出头亮线 = 位置基准，两者在形状上再不会混。
+   出头必须落在 bandbox 上（band 自己 overflow:hidden，出头会被它剪掉）。
+   色值取 --charcoal 而不是评审建议的 --ink：--ink 就是 accent 的那个 hex，
+   三条带子上常驻三道 accent 白线正是 REVISION 4 把填充从 --ink 降到 --charcoal 时
+   处理过的同一个问题（常驻标记的面积远大于 25px² 的未读点，accent 会失效）。
+   降半档不影响可读：对带外的 --surface 11.2:1，对暗轨道 13:1，
+   而它与缺口的分界从来就不靠颜色，靠的是「出头」这个形状。 */
+.page-b .band .caret{display:none}
+.page-b .bandbox .caret{position:absolute;top:-3px;bottom:-3px;width:2px;
+  background:var(--charcoal);border-radius:1px;margin-left:-1px}
 /* R5-02 · 重置刻度原来是带内一道 --mute 竖线，对 ash 轨道只有 1.95:1，不可辨；
    而且在 97% 那种窗口末期会和「现在」游标挤成一个 4px 的明暗簇（R5-10）。
    改成与游标同源的机制：上下各出头 2px 落到带外的 --surface 上（7.09:1），
@@ -765,7 +798,7 @@ html[data-pure="1"] .pure-hint{position:fixed;left:50%;bottom:24px;transform:tra
    加 overflow:hidden 兜底：真实数据里出现更长的时间串时截断，而不是压到图标上。 */
 .rtime{font-family:var(--font-num);font-feature-settings:var(--num-features);
   font-variant-numeric:tabular-nums;font-size:var(--fs-min);color:var(--mute);
-  white-space:nowrap;text-align:right;line-height:1;min-width:0;overflow:hidden}
+  white-space:nowrap;text-align:right;line-height:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .rkind{display:inline-flex;align-items:center;justify-content:center;color:var(--mute)}
 .rkind[data-kind="failed"]{color:var(--danger)}
 .rkind[data-kind="running"]{color:var(--idc);animation:pulse var(--cycle-pulse) var(--ease-standard) infinite}
@@ -806,19 +839,37 @@ html[data-pure="1"] .pure-hint{position:fixed;left:50%;bottom:24px;transform:tra
 .page-d .d-head{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-sm);flex:none;height:20px}
 .page-d .d-title{font-size:var(--fs-body-r);font-weight:var(--w-emph);color:var(--ink);
   white-space:nowrap;line-height:1}
-.page-d .d-legend{display:flex;align-items:center;gap:var(--sp-md);
-  font-size:var(--fs-min);color:var(--mute);line-height:1}
-.page-d .d-legend span{display:inline-flex;align-items:center;gap:var(--sp-xs);white-space:nowrap}
-.page-d .d-legend i{width:var(--dot);height:var(--dot);border-radius:var(--r-full);background:var(--idc)}
-/* 数据只有 8 周时格子占不满 464px。左对齐会读成「右边那片是不是没加载出来」，
-   所以整块居中——列数少是数据的事实，不该让版面看起来像坏了。 */
-.page-d .d-grid{display:flex;gap:var(--sp-sm);flex:1;min-height:0;
-  align-items:center;justify-content:center}
-.page-d .d-days{display:grid;grid-auto-rows:var(--cell);row-gap:2px;flex:none;width:26px;
+/* D-4 · 页眉右侧原来挂着三个身份色圆点的图例，而正下方是一张完全按总量分档的
+   中性网格——图例承诺了一个不存在的 encoding，比没有图例更糟。
+   删掉圆点，位置交给「这一格是哪一天」（与 E 页页眉右侧的更新时间同一个槽位、
+   同一个职责：这屏说的是哪个时刻），分档说明用一句话接在标题后面——
+   一个说得清 encoding 的句子，比五个说不清的色块便宜也诚实。
+   三家的实际数值下移到说明行（见 .d-nums 那段的宽度账）。 */
+.page-d .d-hint{flex:1;min-width:0;font-size:var(--fs-min);color:var(--mute);line-height:1;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.page-d .d-date{flex:none;font-family:var(--font-num);font-feature-settings:var(--num-features);
+  font-variant-numeric:tabular-nums;font-size:var(--fs-min);color:var(--ink);
+  white-space:nowrap;line-height:1}
+/* D-1 · 格子尺寸不再写死 13px，由 renderPageD 推出：
+   **宽度永远填满这一行的可用宽**（列宽 = 宽预算 / 周数），
+   **高度取 min(列宽, 高预算 / 7)**，上限 28px。
+   于是 8 周时是 42×18 的横向格（填满宽、填满高），26 周时列宽掉到 11px、
+   高度跟着降成 11px 的方格并纵向居中——密排时自己退化回 GitHub 那种方格，
+   不需要再改第二次。
+   **为什么放弃正方形**：8 列 × 方格要同时填满 353px 的宽，列距会长到 30px，
+   比格子本身还宽，网格结构会散成八条互不相干的竖带（实拍确认过）。
+   方格、填满宽、纵向居中三条在 8 列上不可兼得，舍掉的是方格——
+   这是评审明写「合法的、故意的选择，只要写进笔记」的那一条。
+   回报：单格从 2.08mm² 级的小方块长到 6.7mm × 2.88mm，
+   五档明度阶第一次在 55cm 上有机会分得开（D-2 因此先不动颜色）。 */
+.page-d .d-grid{display:flex;gap:var(--sp-sm);flex:1;min-height:0;align-items:center}
+.page-d .d-days{display:grid;grid-auto-rows:var(--cell-h);row-gap:2px;flex:none;width:26px;
   font-size:var(--fs-min);color:var(--mute)}
-.page-d .d-days span{line-height:var(--cell)}
-.page-d .d-cells{display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,var(--cell));gap:2px;flex:none}
-.page-d .cell{width:var(--cell);height:var(--cell);border-radius:2px;border:0;padding:0;
+.page-d .d-days span{line-height:var(--cell-h)}
+.page-d .d-cells{display:grid;grid-auto-flow:column;grid-auto-columns:var(--cell-w);
+  grid-template-rows:repeat(7,var(--cell-h));row-gap:2px;column-gap:2px;
+  flex:1;min-width:0;justify-content:space-between}
+.page-d .cell{width:var(--cell-w);height:var(--cell-h);border-radius:2px;border:0;padding:0;
   background:var(--heat-0);cursor:default}
 .page-d .cell[data-l="1"]{background:var(--heat-1)}
 .page-d .cell[data-l="2"]{background:var(--heat-2)}
@@ -828,10 +879,20 @@ html[data-pure="1"] .pure-hint{position:fixed;left:50%;bottom:24px;transform:tra
 .page-d .cell:focus-visible{outline:none;box-shadow:0 0 0 2px var(--accent)}
 .page-d .d-tip{flex:none;height:20px;font-size:var(--fs-min);color:var(--body);line-height:20px;
   display:flex;align-items:center;justify-content:flex-start;gap:var(--sp-sm);overflow:hidden;white-space:nowrap}
-.page-d .d-tip b{font-weight:var(--w-emph);color:var(--ink)}
-.page-d .d-tip .dim{color:var(--mute);overflow:hidden;text-overflow:ellipsis}
-.page-d .d-scale{display:flex;align-items:center;gap:var(--sp-xs);flex:none;margin-inline-start:var(--sp-sm)}
-.page-d .d-scale i{width:8px;height:8px;border-radius:2px;display:block}
+/* D-3 · 说明行原来是「日期 + 三家数值 + 5 个色阶方块」挤在一个定长裁切盒里，
+   被牺牲的永远是集合的尾巴——第三家 agent 整个消失，而这行是这块屏上唯一的
+   精确值出口（面板没有指针，hover 永远不会发生，它就是 tooltip 本身）。
+   色阶方块删掉（5 个 1.3mm 的灰块在 55cm 外只是噪点，又没有「少 / 多」锚点，
+   解释不了任何东西），日期上移到页眉，这一行整条让给三家的数值。
+   宽度账（403 画布，行宽 387）：三家带各自单位实测 323–358px，
+   而页眉光是标题就要 127px —— 数值放进页眉必然再截一次，所以两者换了个位置：
+   页眉说「这是什么、哪一天」，这一行说「各是多少」，一家都不少。 */
+.page-d .d-nums{display:flex;align-items:baseline;gap:var(--sp-md);min-width:0;
+  font-size:var(--fs-min);color:var(--mute);line-height:1;white-space:nowrap}
+.page-d .d-nums span{white-space:nowrap}
+.page-d .d-nums b{font-weight:var(--w-emph);color:var(--ink);
+  font-family:var(--font-num);font-feature-settings:var(--num-features);
+  font-variant-numeric:tabular-nums}
 
 /* ==========================================================================
    E 页 · 今日 AI 大事（AIHOT）—— 这一页是阅读不是扫视，五条等权
@@ -844,7 +905,12 @@ html[data-pure="1"] .pure-hint{position:fixed;left:50%;bottom:24px;transform:tra
 .page-e .e-list{flex:1;min-height:0;display:flex;flex-direction:column;gap:var(--sp-xs);overflow:hidden}
 /* 第三列写成 minmax(0,34%) 而不是 auto：auto 列按 max-content 定宽，
    遇到超长来源名会把整个网格撑出画布（403 宽下必现，edge 态更明显）。 */
-.page-e .e-item{flex:1;min-height:0;display:grid;grid-template-columns:18px minmax(0,1fr) minmax(0,34%);
+/* E-1 · 第三列从 34% 提到 40%：剥掉前缀之后中文来源名普遍 ≤5 个全角字（70px），
+   但拉丁名不是——「Gary Marcus」85px、「Hacker News」88px，34% 只给到 67px，
+   于是屏上是「Gary M…」，和「公众号：…」一样读不出是谁。40% 给到 88px，
+   今天三条真实来源全数完整；代价是标题列 221→198px，而标题本来就按行数省略，
+   少 10% 只是省略号早一点，来源少一半却是署名消失。 */
+.page-e .e-item{flex:1;min-height:0;display:grid;grid-template-columns:18px minmax(0,1fr) minmax(0,40%);
   column-gap:var(--sp-sm);align-items:center}
 .page-e .e-no{font-family:var(--font-num);font-feature-settings:var(--num-features);
   font-variant-numeric:tabular-nums;font-size:var(--fs-min);color:var(--mute);text-align:right;line-height:1}
@@ -2326,12 +2392,16 @@ const EVENTS = JSON.parse(document.getElementById("fx-events").textContent).even
 const USAGE  = JSON.parse(document.getElementById("fx-usage").textContent);
 const NEWS   = JSON.parse(document.getElementById("fx-news").textContent);
 
+/* A-2 · shortName 是「瓦片这种窄盒里的正式名字」，不是省略号的替代品：
+   A 页三块瓦片各只有 105.67px 内宽，「Claude Code」在 16px 下要 92px 再加
+   身份点与间距就超了，于是屏上出现「Claude Co…」——唯一的身份标签被砍掉一半。
+   B / C 页的行宽放得下全名，仍用 name；只有 A 页降到 shortName。 */
 const AGENTS = {
-  codex : {id:"codex",  name:"Codex",       tag:"Codex",  color:"var(--id-codex)",
+  codex : {id:"codex",  name:"Codex",       shortName:"Codex",  tag:"Codex",  color:"var(--id-codex)",
            fill:"var(--quota-fill-codex)" },
-  claude: {id:"claude", name:"Claude Code", tag:"Claude", color:"var(--id-claude)",
+  claude: {id:"claude", name:"Claude Code", shortName:"Claude", tag:"Claude", color:"var(--id-claude)",
            fill:"var(--quota-fill-claude)"},
-  zcode : {id:"zcode",  name:"ZCode",       tag:"ZCode",  color:"var(--id-zcode)",
+  zcode : {id:"zcode",  name:"ZCode",       shortName:"ZCode",  tag:"ZCode",  color:"var(--id-zcode)",
            fill:"var(--quota-fill-zcode)" },
 };
 
@@ -2545,7 +2615,7 @@ function renderPageA(){
   el.paTiles.innerHTML = scene.tiles.map(t => {
     const a = AGENTS[t.agent];
     const lv = t.phase === "ok" ? level(t.windows[0].usedPercent) : "ok";
-    const head = `<div class="tile-head"><h2 class="tile-name">${esc(a.name)}</h2>` +
+    const head = `<div class="tile-head"><h2 class="tile-name">${esc(a.shortName)}</h2>` +
       `<span class="iddot"${t.status === "offline" ? ' data-off="1"' : ""}></span></div>`;
     let body;
     if (t.phase === "loading") body = `<div class="skel"><i style="height:44px;width:70%"></i>
@@ -2605,7 +2675,8 @@ function renderPageB(){
         <div class="bandbox">
           <div class="band" role="img" aria-label="5h 窗已用 ${w5.usedPercent}%，右端为重置点">
             <span class="used" style="width:${w5.usedPercent}%"></span>
-            <span class="caret" data-caret="${start}"></span></div>
+            </div>
+          <span class="caret" data-caret="${start}"></span>
           <span class="resettick"></span></div>`;
     }
     return `<section class="tile" data-status="${t.status}" data-level="${lv}" style="--idc:${a.color};--fill:${a.fill}" ` +
@@ -2707,13 +2778,26 @@ function renderPageD(){
     return;
   }
   const maxI = days.reduce((m, d) => Math.max(m, d.intensity || 0), 0);
-  /* 列数由画布宽度决定：每列 cell+2px，减去星期标签列与间隙 */
-  const cell = 13;
+  /* D-1 · cell 原来写死 13px，而 cols 是「宽度能放下多少列」的上限（算出 23）——
+     版面按 23 列设计，数据给了 8 列，中间缺了「回流到格子尺寸」这一步：
+     热力图只占可用宽的 30%，单格 2.08mm，而这是唯一一页需要分辨密度差异的页。
+     改成由宽 / 高两个预算里较小的那个推出，上限 28px、下限 10px：
+     今天的 8 周给 cell 18（单格 2.88mm，+92% 面积、纵向填满），
+     数据长到 26 周时同一个公式自己降回密排，不需要再改第二次。 */
   const avail = el.pdHeat.clientWidth || (screenW() - 16);
-  const cols = Math.max(4, Math.min(Math.ceil(days.length / 7), Math.floor((avail - 26 - 8 + 2) / (cell + 2))));
+  const gridW = avail - 26 - 8;                                   // 减掉星期标签列与它的间隙
+  const gridH = Math.max(42, el.pdHeat.clientHeight - 20 - 8 - 20 - 8);  // 减掉页眉 / 说明行与两道间隙
+  const cols = Math.max(4, Math.min(Math.ceil(days.length / 7), Math.floor((gridW + 2) / 12)));
   const shown = days.slice(-cols * 7);
   /* 第一格对齐到周一：JS 的 getDay() 周日是 0 */
   const firstIdx = (new Date(shown[0].date).getDay() + 6) % 7;
+  /* 列宽要按**真正会画出来的列数**算：开头补齐到周一的空格会把最后一周挤成第 9 列，
+     按 8 列算宽度就会多画一列、整页溢出 17px（第一版就是这么溢的）。 */
+  const drawnCols = Math.ceil((firstIdx + shown.length) / 7);
+  /* 列宽填满可用宽（上限 48，列数很少时不至于长成色块），行高取 min(列宽, 高预算 / 7)
+     并封顶 28：8 周 → 42×18 填满宽高，26 周 → 11×11 方格并纵向居中，自己退化。 */
+  const cellW = Math.max(10, Math.min(48, Math.floor((gridW + 2) / drawnCols) - 2));
+  const cellH = Math.max(10, Math.min(28, cellW, Math.floor((gridH + 2) / 7) - 2));
   const cellsHtml = Array.from({length: firstIdx}, () =>
       `<span class="cell" data-void="1" aria-hidden="true"></span>`).join("") +
     shown.map(d => {
@@ -2725,27 +2809,31 @@ function renderPageD(){
   const weeks = USAGE.weeks || Math.round(shown.length / 7);
   el.pdHeat.innerHTML = `
     <div class="d-head"><span class="d-title">每日用量 · 近 ${weeks} 周</span>
-      <span class="d-legend">${["codex","claude","zcode"].map(id =>
-        `<span style="--idc:${AGENTS[id].color}"><i></i>${esc(AGENTS[id].tag)}</span>`).join("")}</span></div>
-    <div class="d-grid" style="--cell:${cell}px">
+      <span class="d-hint">颜色越亮用得越多</span>
+      <span class="d-date" id="dDate"></span></div>
+    <div class="d-grid" style="--cell-w:${cellW}px;--cell-h:${cellH}px">
       <div class="d-days">${DAY_LABEL.map(x => `<span>${x}</span>`).join("")}</div>
       <div class="d-cells" id="dCells">${cellsHtml}</div>
     </div>
-    <div class="d-tip" id="dTip"></div>`;
+    <div class="d-tip"><span class="d-nums" id="dNums"></span></div>`;
   const cells = [...el.pdHeat.querySelectorAll(".cell[data-date]")];
   const byDate = Object.fromEntries(days.map(d => [d.date, d]));
-  const tip = el.pdHeat.querySelector("#dTip");
+  const dateEl = el.pdHeat.querySelector("#dDate");
+  const nums = el.pdHeat.querySelector("#dNums");
+  /* D-3 + D-4 · 说明行整条让给三家的数值（各自单位：Codex / Claude 是 token，
+     ZCode 是请求次数），一家都不许缺——缺的那家显式渲染成「—」，
+     而不是让省略号把它吞掉（那正是上一版第三家整个消失的机制）。
+     日期上移到页眉右侧，与 E 页的更新时间同一个槽位。 */
   const showTip = c => {
     const d = byDate[c.dataset.date];
     if (!d) return;
     const b = d.byAgent || {};
-    const parts = [];
-    if (b.codex)  parts.push(`Codex ${fmtNum(b.codex.tokens || 0)} tok`);
-    if (b.claude) parts.push(`Claude ${fmtNum(b.claude.tokens || 0)} tok`);
-    if (b.zcode)  parts.push(`ZCode ${fmtNum(b.zcode.requests || 0)} 次`);
-    tip.innerHTML = `<b>${esc(d.date)}</b><span class="dim">${esc(parts.join(" · "))}</span>` +
-      `<span class="d-scale">${[0,1,2,3,4].map(l =>
-        `<i style="background:var(--heat-${l})"></i>`).join("")}</span>`;
+    const val = (id, v) => `<span>${AGENTS[id].shortName} <b>${v}</b></span>`;
+    dateEl.textContent = d.date;
+    nums.innerHTML =
+      val("codex",  b.codex  ? fmtNum(b.codex.tokens  || 0) + " tok" : "—") +
+      val("claude", b.claude ? fmtNum(b.claude.tokens || 0) + " tok" : "—") +
+      val("zcode",  b.zcode  ? fmtNum(b.zcode.requests || 0) + " 次"  : "—");
     cells.forEach(x => x.tabIndex = x === c ? 0 : -1);
   };
   cells.forEach((c, i) => {
@@ -2764,6 +2852,20 @@ function renderPageD(){
 /* ==========================================================================
    E 页 · 今日 AI 大事（AIHOT）。不打断、不响铃、不计未读。
    ========================================================================== */
+/* E-1 · 来源列原来直接显示 AIHOT 给的整串，于是 72px 的列里出现「公众号：…」——
+   省略号之后一个字都没有，署名的信息量为零。前缀（公众号 / RSS 这类平台词）与
+   括注（渠道说明）都不是来源的身份，剥掉之后真实来源名普遍 ≤6 个全角字，放得下。
+   规则：冒号分段，头段是平台通名就取尾段，否则头段本身就是名字（Gary Marcus /
+   Hacker News）；括注一律去掉。**真正的剥离在数据层（新闻采集侧）做**，原型这里
+   按剥离后的样子渲染，好让版面账算在最终形态上。 */
+const GENERIC_SRC = /^(公众号|微信|微博|知乎|播客|视频号|哔哩哔哩|B\s*站|newsletter|rss|blog|博客|论坛|网站)$/i;
+const srcName = s => {
+  const t = String(s || "").replace(/[（(][^）)]*[）)]\s*$/, "").trim();
+  const seg = t.split(/[：:]/).map(x => x.trim()).filter(Boolean);
+  if (seg.length < 2) return seg[0] || t;
+  return GENERIC_SRC.test(seg[0]) ? seg.slice(1).join(" · ") : seg[0];
+};
+
 function renderPageE(){
   const st = scene.dataState;
   const items = (NEWS.items || []).slice(0, 5);
@@ -2792,7 +2894,7 @@ function renderPageE(){
       const title = edge && i === 0
         ? it.title + "（" + "超长标题压力测试".repeat(5) + "）" : it.title;
       const src = edge && i === 1
-        ? it.source + " · 一个长得离谱的来源名称用来撑破这一列" : it.source;
+        ? srcName(it.source) + " · 一个长得离谱的来源名称用来撑破这一列" : srcName(it.source);
       return `<div class="e-item">
         <span class="e-no">${i + 1}</span>
         <span class="e-t">${esc(title)}</span>
@@ -2847,11 +2949,15 @@ function tickTiles(){
   document.querySelectorAll("[data-word]").forEach(n => {
     const [lv, st] = n.dataset.word.split("|");
     n.textContent =
+      /* A-1 · 「后重置」删掉：左边 15px 的时钟图标已经把「这是倒计时」说完了，
+         这三个字是对图标的文字复述，而它恰好把 5 字符倒计时（约 80% 的时间）
+         挤出瓦片内宽，被硬切成「后重」——一个残缺字形比一个省略号更糟。
+         剩下的四个词都不是复述：它们说的是图标说不了的那件事。 */
       st === "attention" ? "等待你批准"
       : lv === "danger"  ? "吃紧"
       : lv === "warn"    ? "偏紧"
       : st === "running" ? "运行中"
-      :                    "后重置";
+      :                    "";
   });
   document.querySelectorAll("[data-cd]").forEach(n => n.textContent = countdown(n.dataset.cd, t));
   document.querySelectorAll("[data-caret]").forEach(n => {
