@@ -255,6 +255,103 @@ console.log('  reduced-motion:', JSON.stringify(rmOk));
 if (parseFloat(rmOk.transition) !== 0) rhythm.push('reduced-motion 下切页仍有 transition');
 await page.uncheck('#chkRm');
 
+// ---------------- 手动切换 ----------------
+console.log('\n手动切换:');
+const manual = [];
+await page.goto(FILE, { waitUntil: 'domcontentloaded' });
+await page.evaluate(() => Promise.race([document.fonts.ready, new Promise(r => setTimeout(r, 4000))]));
+await page.waitForTimeout(700);
+const holdMs = await page.evaluate(() => {
+  const v = getComputedStyle(document.documentElement).getPropertyValue('--manual-hold').trim();
+  return v.endsWith('ms') ? parseFloat(v) : parseFloat(v) * 1000; });
+console.log('  --manual-hold:', holdMs);
+if (holdMs !== 120000) manual.push(`--manual-hold 不是 120s（实测 ${holdMs / 1000}s）`);
+
+await page.click('#segState button[data-s="populated"]');
+await page.click('#segPage button[data-p="a"]');
+await page.waitForTimeout(150);
+await page.keyboard.press('ArrowRight');
+await page.waitForTimeout(150);
+let m = await page.evaluate(() => ({ page: document.documentElement.dataset.page,
+  hold: !document.getElementById('holdmark').hidden }));
+console.log('  → 之后:', JSON.stringify(m));
+if (m.page !== 'b') manual.push('→ 没有切到下一页');
+if (!m.hold) manual.push('手动切页后没有显示「‖」暂停标记');
+await page.keyboard.press('ArrowLeft'); await page.waitForTimeout(150);
+if (await page.evaluate(() => document.documentElement.dataset.page) !== 'a') manual.push('← 没有切回上一页');
+await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowRight'); await page.waitForTimeout(150);
+await page.keyboard.press('Home'); await page.waitForTimeout(150);
+if (await page.evaluate(() => document.documentElement.dataset.page) !== 'a') manual.push('Home 没有回 A 页');
+
+// 指示点：热区 24×24，视觉仍 4px
+const dot = await page.evaluate(() => {
+  const b = document.querySelector('#dots button[data-p="c"]');
+  const r = b.getBoundingClientRect(), z = Number(getComputedStyle(document.documentElement).getPropertyValue('--screen-zoom')) || 1;
+  return { w: Math.round(r.width / z), h: Math.round(r.height / z),
+           visual: getComputedStyle(b, '::after').width };
+});
+console.log('  指示点:', JSON.stringify(dot));
+if (dot.w < 24 || dot.h < 24) manual.push(`指示点热区不足 24×24（实测 ${dot.w}×${dot.h}）`);
+if (dot.visual !== '4px') manual.push(`指示点视觉不是 4px（实测 ${dot.visual}）`);
+await page.click('#dots button[data-p="c"]'); await page.waitForTimeout(150);
+if (await page.evaluate(() => document.documentElement.dataset.page) !== 'c') manual.push('点击指示点没有跳页');
+
+// 边缘热区 15% + hover chevron
+const edge = await page.evaluate(() => {
+  const e = document.querySelector('.edge[data-side="next"]');
+  const pgs = document.getElementById('pages').getBoundingClientRect();
+  return { pct: Math.round(e.getBoundingClientRect().width / pgs.width * 100),
+           svg: getComputedStyle(e.querySelector('svg')).width,
+           opacity: getComputedStyle(e.querySelector('svg')).opacity };
+});
+console.log('  边缘热区:', JSON.stringify(edge));
+if (edge.pct !== 15) manual.push(`边缘热区不是 15%（实测 ${edge.pct}%）`);
+if (edge.svg !== '24px') manual.push(`chevron 不是 24px（实测 ${edge.svg}）`);
+if (edge.opacity !== '0') manual.push('chevron 默认就可见（应当 hover 才浮出）');
+await page.hover('.edge[data-side="next"]'); await page.waitForTimeout(250);
+const shown = await page.evaluate(() => getComputedStyle(document.querySelector('.edge[data-side="next"] svg')).opacity);
+console.log('  hover 后 chevron opacity:', shown);
+if (shown === '0') manual.push('hover 后 chevron 没有浮出');
+await page.waitForTimeout(2300);
+const faded = await page.evaluate(() => document.querySelector('.edge[data-side="next"]').dataset.hint);
+console.log('  2s 无移动后:', faded);
+if (faded === '1') manual.push('2s 无移动后 chevron 没有隐藏');
+
+// 手动之后：压短 dwell，确认 hold 期间不自动翻页
+await page.addStyleTag({ content: ':root{--dwell-a:.3s;--dwell-b:.3s;--dwell-c:.3s}' });
+await page.click('#dots button[data-p="b"]'); await page.waitForTimeout(1500);
+const stayed = await page.evaluate(() => document.documentElement.dataset.page);
+console.log('  手动切页后 1.5s（dwell 已压到 0.3s）:', stayed);
+if (stayed !== 'b') manual.push(`手动暂停期间仍自动翻页（跑到了 ${stayed}）`);
+// 但新事件仍然打断
+await page.click('#btnPush'); await page.waitForTimeout(200);
+const toC = await page.evaluate(() => document.documentElement.dataset.page);
+console.log('  手动暂停期间来新事件:', toC);
+if (toC !== 'c') manual.push('手动暂停期间新事件没有跳 C');
+// attention 下 ←/→ 无效
+await page.click('#btnAttn'); await page.waitForTimeout(250);
+await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowLeft');
+await page.waitForTimeout(200);
+const attnPage = await page.evaluate(() => document.documentElement.dataset.page);
+console.log('  attention 下按 ←/→:', attnPage);
+if (attnPage !== 'attn') manual.push('attention 页被 ←/→ 切走了');
+// 但 Enter 仍可 ack
+await page.click('#segPage button[data-p="c"]'); await page.waitForTimeout(250);
+// 调试视图里控制栏还在，单按一次 Tab 只会落到隔壁的控制栏按钮上（上一版就是这么
+// 误报的）。一路 Tab 到焦点真的进了画布再按 Enter。
+for (let i = 0; i < 30 && !await page.evaluate(() => !!document.activeElement.closest('#stage')); i++)
+  await page.keyboard.press('Tab');
+await page.keyboard.press('Enter'); await page.waitForTimeout(250);
+// 判据是 attention 真的被解除（回到 A 且 attention 行消失），不是 live 文本里有「批准」两个字
+const afterAck = await page.evaluate(() => ({
+  page: document.documentElement.dataset.page,
+  // ack 之后那一行仍在事件流里（它是一条已处理的事件），判据是它不再 unread
+  stillAttn: !!document.querySelector('.row[data-kind="attention"][data-unread="1"]'),
+  live: document.getElementById('live').textContent }));
+console.log('  attention 行 Enter ack:', JSON.stringify(afterAck));
+if (afterAck.stillAttn || afterAck.page !== 'a') manual.push('attention 行不能用 Enter ack 解除');
+console.log('\n手动切换问题:', manual.length ? manual : 'none');
+
 // ---------------- 纯净模式 ----------------
 console.log('\n纯净模式:');
 const pure = [];
@@ -268,7 +365,7 @@ let st = await page.evaluate(() => ({
   bodyBg: getComputedStyle(document.body).backgroundColor,
   canvas: getComputedStyle(document.documentElement).getPropertyValue('--canvas').trim(),
   rotate: document.documentElement.dataset.rotate,
-  dots: !!document.querySelector('#dots i[data-on="1"]'),
+  dots: !!document.querySelector('#dots button[data-on="1"]'),
   page: document.documentElement.dataset.page,
 }));
 console.log('  按 P 之后:', JSON.stringify(st));
@@ -325,6 +422,13 @@ else {
   console.log('  纯净模式下 Enter ack:', JSON.stringify(live));
   if (!/已读|读完/.test(live || '')) pure.push('纯净模式下 Enter 不能 ack');
 }
+
+// 纯净模式下手动切换仍可用
+await page.keyboard.press('ArrowRight'); await page.waitForTimeout(200);
+const pureManual = await page.evaluate(() => ({ pure: document.documentElement.dataset.pure,
+  page: document.documentElement.dataset.page, hold: !document.getElementById('holdmark').hidden }));
+console.log('  纯净模式下按 →:', JSON.stringify(pureManual));
+if (pureManual.pure !== '1') pure.push('纯净模式被 → 退出了');
 
 console.log('\n纯净模式问题:', pure.length ? pure : 'none');
 console.log('\nconsole errors:', consoleErrors.length ? consoleErrors : 'none');

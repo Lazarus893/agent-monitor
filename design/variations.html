@@ -53,6 +53,15 @@ STATES —— 7 种状态仍然完整，每一页都要能渲染它们
   必须由用户手势触发。Esc 或再按 P 退出回调试视图。
   纯净模式下轮播强制开、忽略 localStorage 的手动选页；键盘 ack 与指示点保留。
 
+手动切换
+  ← / → 切上一页 / 下一页，↑ 或 Home 回 A；点击右下角指示点直接跳页（热区 24×24，
+  视觉仍 4px）；点击画布左右各 15% 的边缘区切页——无常驻控件，鼠标移入才浮出 24px
+  monoline chevron，2s 无移动即隐藏。
+  手动切页后轮播暂停 --manual-hold（120s），指示点左侧挂一个 14px 的「‖」；
+  120s 无操作从当前页继续。打断优先级不变：期间来了新事件仍跳 C 并重新计时，
+  attention 仍接管整屏。attention 页不能被手动切走（它需要被处理），但可以 Enter ack。
+  纯净模式下以上全部可用。
+
 INTERACTION
   点击 / Enter / Space 事件行 = ack（attention 行 ack 即解除接管）
   控制栏：页切换 / 自动轮播开关 / 7 状态 / 模拟新事件 / 模拟等待批准 / reduced-motion
@@ -346,6 +355,11 @@ accent
   --dwell-b:      60s;
   --dwell-c:      60s;
   --dwell-event:  60s;  /* 新事件跳 C 后停满一个 dwell，再来一条重新计时     */
+  /* 手动切页后轮播暂停多久（REVISION 6）。120 s 是「看完一页还想再看一会儿」与
+     「别让屏永远停在我忘了的那一页」之间的折中：比一个 dwell 长一倍，
+     又短到不需要用户记得去恢复它。期间指示点左侧挂一个「‖」，
+     让「现在是我按停的」这件事一直可见，而不是让人以为轮播坏了。 */
+  --manual-hold: 120s;
   --dur-page:    300ms; /* 横向滑动切页                                     */
 
   /* ==========================================================================
@@ -530,10 +544,26 @@ html[data-pure="1"] .pure-hint{position:fixed;left:50%;bottom:24px;transform:tra
 .page[data-on="1"]{opacity:1;pointer-events:auto;transform:none}
 
 /* ---- 页指示：右下角三点。简报明确写了这不算 accent ---- */
-.dots{position:absolute;right:0;bottom:0;display:flex;gap:var(--sp-xs);align-items:center}
-.dots i{width:4px;height:4px;border-radius:var(--r-full);background:var(--ash);display:block;
+.dots{position:absolute;right:0;bottom:0;display:flex;align-items:center;z-index:3}
+/* 视觉仍是 4px 点，热区放大到 24×24：点本身用伪元素画，button 只负责命中 */
+.dots button{appearance:none;border:0;background:transparent;padding:0;cursor:pointer;
+  width:24px;height:24px;display:grid;place-items:center}
+.dots button::after{content:"";width:4px;height:4px;border-radius:var(--r-full);background:var(--ash);
   transition:background var(--dur-state) var(--ease-standard)}
-.dots i[data-on="1"]{background:var(--ink)}
+.dots button[data-on="1"]::after{background:var(--ink)}
+.dots button:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--accent);border-radius:var(--r-xs)}
+/* 手动暂停标记：14px「‖」，让「是我按停的」一直可见，而不是让人以为轮播坏了 */
+.holdmark{font-size:var(--fs-min);color:var(--mute);line-height:1;padding-right:var(--sp-xs)}
+.holdmark[hidden]{display:none}
+
+/* ---- 左右各 15% 的边缘切页热区：无常驻控件，hover 才浮出 chevron ---- */
+.edge{position:absolute;top:0;bottom:0;width:15%;border:0;background:transparent;padding:0;
+  cursor:pointer;display:grid;place-items:center;z-index:2;color:var(--mute)}
+.edge[data-side="prev"]{left:0}
+.edge[data-side="next"]{right:0}
+.edge svg{opacity:0;transition:opacity var(--dur-state) var(--ease-standard)}
+.edge[data-hint="1"] svg{opacity:1}
+.edge:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--accent);border-radius:var(--r-sm)}
 
 /* ---- 共用：瓦片 / 状态点 / 数字 / 轨道 ---- */
 .tile{background:var(--surface);border:1px solid var(--hairline);border-radius:var(--r-md);
@@ -795,8 +825,13 @@ html[data-rm="1"] .page{transform:none!important}
         <section class="page page-b" data-p="b"><h2 class="sr">额度详情</h2><div class="bands" id="pbBands"></div></section>
         <section class="page page-c" data-p="c"><h2 class="sr" id="feedTitle">最近完成</h2><div class="feed" id="pcFeed"></div></section>
         <section class="page page-attn" data-p="attn"><h2 class="sr">需要你</h2><div id="paAttn"></div></section>
+        <button type="button" class="edge" data-side="prev" aria-label="上一页"></button>
+        <button type="button" class="edge" data-side="next" aria-label="下一页"></button>
         <div class="dots" id="dots" data-not-accent>
-          <i data-not-accent></i><i data-not-accent></i><i data-not-accent></i>
+          <span class="holdmark" id="holdmark" data-not-accent hidden>&#8214;</span>
+          <button type="button" data-p="a" data-not-accent aria-label="第 1 页 总览"></button>
+          <button type="button" data-p="b" data-not-accent aria-label="第 2 页 额度详情"></button>
+          <button type="button" data-p="c" data-not-accent aria-label="第 3 页 事件"></button>
         </div>
       </div>
     </div>
@@ -1341,6 +1376,7 @@ const el = {
   feedTitle:document.getElementById("feedTitle"), dots:document.getElementById("dots"),
   legend:document.getElementById("legend"), live:document.getElementById("live"),
   meter:document.getElementById("meter"), unread:document.getElementById("unread"),
+  holdmark:document.getElementById("holdmark"),
   topLoading:document.getElementById("topLoading"),
 };
 const LS = {get:(k,d)=>{try{return localStorage.getItem(k) ?? d}catch(e){return d}},
@@ -1357,6 +1393,7 @@ let attnActive = false;                     /* attention 接管中 */
 let dwellUntil = 0;                         /* 当前页的到期时刻（真实毫秒） */
 let eventHold = false;                      /* 新事件把 C 页钉住 */
 let manualHold = 0;                         /* R5-13 · 手动切页的宽限到期时刻 */
+let holdUntil = 0;                          /* 手动切页后的轮播暂停到期时刻 */
 
 const cssMs = name => {
   const v = getComputedStyle(root).getPropertyValue(name).trim();
@@ -1587,15 +1624,31 @@ function showPage(p, {reset = true} = {}){
     n.setAttribute("aria-hidden", on ? "false" : "true");
   });
   /* attention 页三点全暗，读作「当前不在轮播的三页里」—— 这本身就是状态信息 */
-  [...el.dots.children].forEach((n, i) => n.dataset.on = ORDER[i] === p ? "1" : "0");
+  el.dots.querySelectorAll("button").forEach(n => n.dataset.on = n.dataset.p === p ? "1" : "0");
+  el.holdmark.hidden = !(Date.now() < holdUntil);
   if (reset) dwellUntil = Date.now() + dwellFor(p);
+  if (holdUntil && Date.now() >= holdUntil) holdUntil = 0;
   syncTopbar();
   syncSegs();
   el.legend.innerHTML = CAPTIONS[p];
 }
 
+/* 手动切页：暂停轮播 --manual-hold（120s）。打断优先级不变——
+   这期间来了新事件仍跳 C 并重新计时，attention 仍接管整屏。 */
+function manualTo(p){
+  if (attnActive) return;                 /* attention 页不能被手动切走，它需要被处理 */
+  holdUntil = Date.now() + cssMs("--manual-hold");
+  showPage(p);
+}
+function stepPage(d){
+  if (attnActive) return;
+  const i = ORDER.indexOf(page);
+  manualTo(ORDER[((i < 0 ? 0 : i) + d + ORDER.length) % ORDER.length]);
+}
+
 function rotateTick(){
   if (!rotate) return;
+  if (Date.now() < holdUntil) return;      /* 手动暂停中 */
   /* R5-13 · attention 接管期间原本 100ms 内就把手动选择抢回 attn，
      评审者没法用控制栏核对其它页。给手动切页 10s 宽限（工具层，不进画布）。 */
   if (attnActive){ if (Date.now() > manualHold) showPage("attn", {reset:false}); return; }
@@ -1608,7 +1661,10 @@ function rotateTick(){
 function updateMeter(){
   const left = Math.max(0, dwellUntil - Date.now()) / 1000;
   const leftTxt = left >= 10 ? Math.ceil(left) : left.toFixed(1);
+  const held = Math.max(0, holdUntil - Date.now()) / 1000;
+  el.holdmark.hidden = !(held > 0);        /* 每 100ms 刷一次，到期自己消失 */
   const tag = attnActive ? "attention 接管 · 轮播暂停"
+            : held > 0    ? `${page.toUpperCase()} · 手动暂停 ${Math.ceil(held)}s`
             : !rotate     ? "轮播关闭"
             : page === "attn" ? "attention"
             : `${page.toUpperCase()}${eventHold && page === "c" ? " · 新事件钉住" : ""} · ${leftTxt}s`;
@@ -1679,6 +1735,7 @@ function pushEvent(){
   if (anim) el.pcFeed.querySelectorAll(".row").forEach(r => before.set(r.dataset.id, r.getBoundingClientRect().top));
   scene.feed.items.unshift(item);
   eventHold = true;
+  holdUntil = 0;                           /* 打断优先级不变：新事件盖过手动暂停 */
   renderPageC();
   /* 立刻跳到 C 页并停 --dwell-event；期间再来一条会重置这 20s */
   showPage("c");
@@ -1818,6 +1875,42 @@ document.addEventListener("keydown", e => {
   }
 });
 document.getElementById("btnPure").addEventListener("click", () => setPure(true));
+
+/* ---------- 手动切换：键盘 / 指示点 / 边缘热区 ---------- */
+document.addEventListener("keydown", e => {
+  const t = e.target;
+  if (t instanceof HTMLElement &&
+      (t.isContentEditable || t.tagName === "TEXTAREA" || t.tagName === "SELECT" ||
+       (t.tagName === "INPUT" && !["checkbox","radio","button","submit"].includes(t.type))))
+    return;                               /* 只给真正会用方向键的控件让路 */
+  if (e.key === "ArrowRight")      { stepPage(1);  e.preventDefault(); }
+  else if (e.key === "ArrowLeft")  { stepPage(-1); e.preventDefault(); }
+  else if (e.key === "ArrowUp" || e.key === "Home") { manualTo("a"); e.preventDefault(); }
+});
+el.dots.addEventListener("click", e => {
+  const b = e.target.closest("button[data-p]");
+  if (b) manualTo(b.dataset.p);
+});
+const CHEVRON = d => `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" ` +
+  `stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+  `<path d="${d === "prev" ? "M15 5 8 12l7 7" : "M9 5l7 7-7 7"}"/></svg>`;
+let hintTimer = 0;
+document.querySelectorAll(".edge").forEach(n => {
+  n.innerHTML = CHEVRON(n.dataset.side);
+  n.addEventListener("click", () => stepPage(n.dataset.side === "next" ? 1 : -1));
+  /* 无常驻控件：鼠标移入才浮出 chevron，2s 无移动即隐藏 */
+  const show = () => {
+    if (attnActive) return;
+    n.dataset.hint = "1";
+    clearTimeout(hintTimer);
+    hintTimer = setTimeout(() => document.querySelectorAll(".edge").forEach(m => m.dataset.hint = "0"), 2000);
+  };
+  n.addEventListener("mouseenter", show);
+  n.addEventListener("mousemove", show);
+  n.addEventListener("mouseleave", () => n.dataset.hint = "0");
+  n.addEventListener("focus", () => n.dataset.hint = "1");
+  n.addEventListener("blur", () => n.dataset.hint = "0");
+});
 
 chk.checked = rm === "1";
 chkRotate.checked = rotate;
