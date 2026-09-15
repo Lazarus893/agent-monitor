@@ -123,13 +123,16 @@ body{margin:0;background:var(--canvas);overflow:hidden;
   overflow:hidden;text-overflow:ellipsis;line-height:1.2}
 .iddot{width:var(--dot);height:var(--dot);border-radius:var(--r-full);background:var(--idc);flex:none}
 .iddot[data-off="1"]{background:var(--ash)}
-.tile[data-status="running"] .iddot{animation:pulse var(--cycle-pulse) var(--ease-standard) infinite}
+/* 无限循环的动画按 steps 走（M5 实测）：平滑的 opacity 渐变会让合成器每秒画 60 帧，
+   只要有一个 agent 在跑，渲染进程就常驻 3% CPU、GPU 1.3%。8 步一周（每秒 4 帧）
+   看上去仍是在呼吸，合成次数少十五倍。breathe 同理。 */
+.tile[data-status="running"] .iddot{animation:pulse var(--cycle-pulse) steps(8) infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
 .tile[data-status="attention"]{background:var(--surface-elevated)}
 .tile[data-status="attention"]::before,
 .row[data-kind="attention"]::before,
 .attn-card::before{content:"";position:absolute;inset:0;border-radius:inherit;background:var(--ink);
-  opacity:0;pointer-events:none;animation:breathe var(--cycle-breathe) ease-in-out infinite}
+  opacity:0;pointer-events:none;animation:breathe var(--cycle-breathe) steps(12) infinite}
 @keyframes breathe{0%,100%{opacity:0}50%{opacity:.06}}
 .tile[data-status="attention"] .iddot{background:var(--accent);box-shadow:0 0 0 2px rgba(244,244,246,.14)}
 
@@ -319,7 +322,7 @@ body{margin:0;background:var(--canvas);overflow:hidden;
   white-space:nowrap;text-align:right;line-height:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .rkind{display:inline-flex;align-items:center;justify-content:center;color:var(--mute)}
 .rkind[data-kind="failed"]{color:var(--danger)}
-.rkind[data-kind="running"]{color:var(--idc);animation:pulse var(--cycle-pulse) var(--ease-standard) infinite}
+.rkind[data-kind="running"]{color:var(--idc);animation:pulse var(--cycle-pulse) steps(8) infinite}
 .rmark{width:var(--dot);height:var(--dot);border-radius:var(--r-full);background:transparent;justify-self:end}
 .row[data-unread="1"]{background:var(--surface)}
 .row[data-unread="1"] .rtitle{color:var(--ink);font-weight:var(--w-emph)}

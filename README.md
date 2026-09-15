@@ -199,6 +199,10 @@ security delete-generic-password -s agent-monitor -a zcode-bigmodel
 - **`~/.codex/sessions` 越长越慢这件事已经封住**：本机 1624 份 rollout / 391 MB，
   原来每 3 s 全量 `stat` 一遍约占一个核的 0.6%，而且只会一直涨。现在每 3 s 只看
   这一程真读过的文件加今天 / 昨天目录（本机 1 个），老文件降到每 60 s 一次。
+- **常驻开销**（2026-09-15 实测，M1 Mac）：整套约 285 MB（渲染 143 / 主进程 61 / GPU 53 / `ax-pulse` 10），
+  空闲 CPU 主进程 0.3%、`ax-pulse` 0%。定时器：额度 15–60 s、事件 3 s 增量扫、用量与新闻 30 min；
+  渲染层只有一个 250 ms 的轮播拍子，F 页的猫不打字时 8 Hz、打字时才 60 Hz，别的页上一帧都不画；
+  `ax-pulse` 是纯事件驱动（AX 通知），没有轮询，只在没授权时每 5 s 复查一次。
 - **内存**：`pnpm soak` 跑 30 分钟，每分钟记一次 RSS，以第 2 分钟为基线，
   增长超过 30% 判泄漏（明细写在 `$TMPDIR/agent-monitor-soak/soak.json`）。
   24 小时的那一程由你实机跑。

@@ -970,11 +970,24 @@ function drawMidi(t: number): void {
 /**
  * 只在 F 页可见时跑的那个循环。切走就停 —— 别的六页上一帧都不该画，
  * 副屏是一块常亮的屏，空转的 rAF 是白烧的电。
+ *
+ * 节奏分两档（M5 实测：60 Hz 常跑时渲染进程 3.7% CPU，猫明明一动不动）：
+ *   · 打字中 / 里程碑小跳中 —— rAF，爪子要跟手；
+ *   · 其余时候 —— 8 Hz 的 setTimeout。眨眼 110 ms、点头 600 ms、z 700 ms、灯的衰减，
+ *     8 Hz 都看不出差别，而唤醒次数少了七倍。脏键在 drawMidi 里，不变的帧连画都不画。
  */
 let midiRaf = 0
+let midiTimer: ReturnType<typeof setTimeout> | null = null
+const MIDI_IDLE_HZ = 8
+function scheduleMidi(t: number): void {
+  const busy = t - midi.lastInputAt < 1_500 || t < midi.hopUntil
+  if (busy) midiRaf = requestAnimationFrame(midiFrame)
+  else midiTimer = setTimeout(midiFrame, 1000 / MIDI_IDLE_HZ)
+}
 function midiFrame(): void {
-  midiRaf = requestAnimationFrame(midiFrame)
+  midiRaf = 0; midiTimer = null
   const t = now()
+  scheduleMidi(t)
   /* dt 不设上限：心流灯的衰减是单调的且有底（0.06），从别的页回来时一步补齐正好，
      而不是让灯停在离开时的亮度上慢慢往下掉。
      但下限是 0：now() 的原点会在主进程换一份 generatedAt 时整段往回挪（调试栏切场景），
@@ -993,8 +1006,13 @@ function midiFrame(): void {
 
 function syncMidiLoop(): void {
   const on = pg.page === 'f'
-  if (on && !midiRaf) midiRaf = requestAnimationFrame(midiFrame)
-  else if (!on && midiRaf) { cancelAnimationFrame(midiRaf); midiRaf = 0 }
+  const running = midiRaf !== 0 || midiTimer !== null
+  if (on && !running) midiRaf = requestAnimationFrame(midiFrame)
+  else if (!on && running) {
+    if (midiRaf) cancelAnimationFrame(midiRaf)
+    if (midiTimer) clearTimeout(midiTimer)
+    midiRaf = 0; midiTimer = null
+  }
 }
 
 /**
@@ -1008,6 +1026,8 @@ window.monitor.onPulse(p => {
   midi.flow = flowStep(midi.flow, { now: t, lastInputAt: t, dt: 0, delta: p.delta })
   midi.litKey = Math.floor(Math.random() * 9)
   midi.litUntil = t + 90
+  // 正处在 8 Hz 的空闲档：这一下敲键不能等下一拍，立刻把循环切回 rAF
+  if (midiTimer) { clearTimeout(midiTimer); midiTimer = null; midiRaf = requestAnimationFrame(midiFrame) }
 
   /* 打断 3 · 打字（M5）。连敲 3 下（2 s 内）才算开始打字；之后每个键都把 F 页的到期往后推。
      用真实时钟做判定（pager 全程用 Date.now），now() 只是猫自己的钟。
@@ -1173,7 +1193,7 @@ function syncTopbar(): void {
 }
 
 function updateMeter(): void {
-  // ‖ 每 100ms 刷一次，到期自己消失 —— 只在切页时刷会让它停在屏上
+  // ‖ 每 250ms 刷一次，到期自己消失 —— 只在切页时刷会让它停在屏上
   if (holdmark) holdmark.hidden = !manualPaused(pg, Date.now())
   if (!DEBUG) return
   const left = Math.max(0, pg.dwellUntil - Date.now()) / 1000
@@ -1539,9 +1559,11 @@ document.addEventListener('focusin', e => {
 })
 
 setInterval(() => { tickClocks(); tickTiles(); tickFeed() }, 1000)
+/* 250 ms 一拍：dwell 最短 30 s、手动暂停 120 s，四分之一秒的误差看不出来，
+   而这是整个渲染进程唯一常驻的高频定时器 —— 100 ms 时它一个人就占了每秒十次唤醒。 */
 setInterval(() => {
   const before = pg.page
   pg = tick(pg, Date.now(), cfg)
   if (pg.page !== before || lastPage !== pg.page) applyPage()
   updateMeter()
-}, 100)
+}, 250)
