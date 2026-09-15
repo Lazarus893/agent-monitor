@@ -296,12 +296,18 @@ describe('浅扫 / 深扫', () => {
     await c.start()                       // 启动是全量：old 进表并记 offset
     expect(sk.events).toHaveLength(0)
 
+    /* 把监听关掉再改文件 —— 否则测的就不是「浅扫看不看老文件」了。
+       fs.watch 会把被改的文件名记进 dirty，下一轮 targets() 无条件带上它：
+       那是**故意设计的快路径**（resume 一个老会话不用等 60 s 深扫）。
+       它和浅扫是两套机制，混在一起时谁先到全看 FSEvents 这一刻多快 ——
+       实测就是这么偶发红的：10 轮带负载的全量里红了 1 次，
+       红的原因是「另一条正确的路先跑到了」，不是这条路错了。 */
+    c.stop()
     appendFileSync(old, src[src.length - 1]! + '\n')
     await c.tick(false)                   // 浅扫：skipped 的老文件不在名单里
     expect(sk.events).toHaveLength(0)
 
     await c.tick()                        // 深扫：捡起来
-    c.stop()
     expect(sk.events.filter(e => e.kind === 'completed')).toHaveLength(1)
   })
 
