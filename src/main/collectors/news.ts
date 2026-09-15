@@ -82,23 +82,39 @@ export function shortSource(raw: string): string {
   return pick || base
 }
 
-/** links 里优先 AIHOT 阅读页，其次原文；两者都没有才看 url 字段 */
+/**
+ * 这一条的**站内阅读页**。
+ *
+ * 只取 `links.aihot`，退回顶层 `url` 字段；**不退回 `links.original`** ——
+ * 原文链接指向公众号 / substack / 随便哪个站，那正是 brief-m0-v2 §8 的域名白名单
+ * 要挡住的东西。取不到就返回 undefined，那一条点了不开。
+ *
+ * 这里只做「是不是个 http(s) 串」的粗筛；协议与域名的正式校验在主进程
+ * （`safeNewsUrl`），因为那才是真正 `shell.openExternal` 的地方。
+ */
 export function pickUrl(item: Record<string, unknown>): string | undefined {
   const links = item['links']
-  const candidates: unknown[] = isRec(links) ? [links['aihot'], links['original']] : []
+  const candidates: unknown[] = isRec(links) ? [links['aihot']] : []
   candidates.push(item['url'])
   for (const c of candidates) {
     if (typeof c !== 'string') continue
-    // 只接受 http(s)：javascript: / data: 这类绝不进状态
+    // 只接受 http(s)：javascript: / data: 这类绝不进任何地方
     if (/^https?:\/\//i.test(c)) return c
   }
   return undefined
 }
 
-export function parseItems(raw: unknown, limit = 5): NewsItem[] {
+/**
+ * 一次解析出**两样东西**：给渲染层的条目，和留在主进程的链接表。
+ *
+ * 分成两个函数各扫一遍的话，id 的推导（缺 id 时按 `aihot:<序号>:<标题前 16 字>` 兜底）
+ * 就有两份，迟早对不上 —— 而对不上的表现是「点了没反应」，最难查的那一种。
+ */
+export function parseFeed(raw: unknown, limit = 5): { items: NewsItem[]; links: Map<string, string> } {
   const root = isRec(raw) ? raw : null
   const list = root && Array.isArray(root['items']) ? root['items'] : Array.isArray(raw) ? raw : []
   const out: NewsItem[] = []
+  const links = new Map<string, string>()
   for (const it of list) {
     if (!isRec(it)) continue
     const title = typeof it['title'] === 'string' ? clip(it['title'], TITLE_MAX) : ''
@@ -113,7 +129,7 @@ export function parseItems(raw: unknown, limit = 5): NewsItem[] {
     const src = sourceName(it['source'])
     if (src) item.source = clip(shortSource(src), 40)
     const url = pickUrl(it)
-    if (url) item.url = url
+    if (url) links.set(item.id, url)
     const at = it['publishedAt'] ?? it['at']
     if (typeof at === 'string' && !Number.isNaN(Date.parse(at))) item.at = at
     if (typeof it['reason'] === 'string' && it['reason'].trim()) {
@@ -122,11 +138,14 @@ export function parseItems(raw: unknown, limit = 5): NewsItem[] {
     out.push(item)
     if (out.length >= limit) break
   }
-  return out
+  return { items: out, links }
 }
 
+/** 只要条目（既有调用点与用例用这个） */
+export const parseItems = (raw: unknown, limit = 5): NewsItem[] => parseFeed(raw, limit).items
+
 export type NewsFetchResult =
-  | { ok: true; items: NewsItem[]; etag?: string }
+  | { ok: true; items: NewsItem[]; links: Map<string, string>; etag?: string }
   | { ok: true; notModified: true }
   | { ok: false; code: 'network' | 'rate_limited' | 'unauthorized' }
 
@@ -156,7 +175,9 @@ export async function fetchNews(
   } catch {
     return { ok: false, code: 'network' }
   }
-  const out: { ok: true; items: NewsItem[]; etag?: string } = { ok: true, items: parseItems(raw) }
+  const feed = parseFeed(raw)
+  const out: { ok: true; items: NewsItem[]; links: Map<string, string>; etag?: string } =
+    { ok: true, items: feed.items, links: feed.links }
   const tag = res.headers.get('etag')
   if (tag) out.etag = tag
   return out
@@ -168,12 +189,23 @@ export class NewsCollector {
   private data: NewsData | null = null
   private timer: ReturnType<typeof setTimeout> | null = null
   private failures = 0
+  /**
+   * 条目 id → 站内阅读页。**只留在主进程**，不进 NewsData、不进缓存文件、不过 IPC。
+   * 不落缓存的代价：重启之后、第一轮抓回来之前（`start()` 立刻抓一次，通常一两秒）
+   * 点某条不会打开，只记一行 WARN。比把一串来自网络的 URL 存进盘上再读回来划算。
+   */
+  private links = new Map<string, string>()
 
   constructor(
     private version: string,
     private onData: (d: NewsData) => void,
     private log: (line: string) => void = console.log
   ) {}
+
+  /** 某条的站内阅读页；没有就是 undefined（缓存回灌那一程、或这条本来就没给 links.aihot） */
+  linkFor(id: string): string | undefined {
+    return this.links.get(id)
+  }
 
   /** 缓存回灌（主进程启动时从 userData 读到的上一份） */
   seed(data: NewsData | null): void {
@@ -207,6 +239,7 @@ export class NewsCollector {
       if (!('notModified' in r)) {
         this.etag = r.etag
         this.data = { updatedAt: new Date().toISOString(), items: r.items }
+        this.links = r.links
       } else if (this.data) {
         this.data = { ...this.data, updatedAt: new Date().toISOString() }
       }

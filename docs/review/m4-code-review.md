@@ -644,3 +644,192 @@ P1-① 还捎带发现并修了 `install-claude-statusline.mjs` 缺 import 守�
 剩下的 11 条 P2 没有一条会损坏用户数据或泄漏凭据。若要挑一条在提交后优先处理，
 仍然是 **§5.3（启动期致命错误的兜底）**——P1-③ 把「窗口全关也不退」定成了新语义之后，
 「进程活着但一个 UI 都没有」这个形态更容易出现，而用户看到的仍然只是「双击了什么都没发生」。
+
+---
+
+## 10. 复验 2（2026-09-15，newslink / titles / app.css button）
+
+只读复验，未改代码、未启动 app。`pnpm test` **28 文件 / 436 项**全过（上一轮 26/374，+2 文件 +62 项），
+`pnpm build` exit 0。
+
+### 10.1 `newslink.ts` + `openNews` —— 逐条核对
+
+**✅ 协议白名单**：`newslink.ts:46` 只认 `https:`。`http:` 也挡（用例 `:57-62` 明确断言
+`http://aihot.news/items/x → protocol`）。`javascript:` / `data:` / `file:` 连不到域名那一关就被协议挡下。
+
+**✅ 域名白名单，且后缀相似域确实挡得住**。`allowedNewsHost`（`:22-25`）的判据是
+`h === d || h.endsWith('.' + d)`——**点号写在前缀里**，这正是挡住后缀相似域的关键。
+我按字符串逐个验算过 `tests/newslink.test.ts:28` 的四个反例：
+
+| 输入 | `.aihot.news` 后缀比对 | 结论 |
+|---|---|---|
+| `evil-aihot.news`（15 字符） | 末 11 字符是 `-aihot.news`，不是 `.aihot.news` | ❌ 挡住 ✅ |
+| `aihot.news.evil.com` | 既不相等也不以白名单项结尾 | ❌ 挡住 ✅ |
+| `notaihot.news` | 末 11 字符是 `taihot.news` | ❌ 挡住 ✅ |
+| `aihot.virxact.com.evil.io` | 同上 | ❌ 挡住 ✅ |
+
+正例 `aihot.news` / `www.aihot.news` / `a.b.aihot.news` / `AIHOT.NEWS` / `aihot.virxact.com` 全放行（`:22`）。
+另外两类花样也被 `URL` 的解析语义自然挡掉，并且有用例（`:69-73`）：
+`https://aihot.news@evil.com/x` 的 `hostname` 是 `evil.com` → `host` 拒。
+
+**✅ id 校验**：`validNewsId`（`:56-62`）要求字符串、非空、`≤ MAX_NEWS_ID (64)`、无控制字符；
+**故意不挡空格**，理由写在注释里（缺 id 时兜底生成的是 `aihot:<序号>:<标题前 16 字>`，标题里有空格）。
+用例 `:76-98` 覆盖 cuid、兜底 id、非字符串 / 空串 / 超长、控制字符、空格。
+
+**✅ sender 校验**：`index.ts:160` 的 `if (!fromPanel(e)) return` 是这个 handler 的第一行。
+
+**✅ 渲染层 / NewsData / 缓存 / IPC 里都没有 url**：
+- `shared/types.ts:138-146` 的 `NewsItem` 无 `url`；`tests/newslink.test.ts:114-119` 直接读源码断言
+  `export type NewsItem` 到 `export type NewsData` 之间不许再出现 `url?:`——**加回去就会红**，正是要的那条闸门。
+- `:101-112` 另一条拿真实 fixture 跑 `parseFeed`，断言每个 item 的 `Object.keys` 不含 `url`，
+  而 `links` 表里查得到——两边同时钉住「渲染层没有 / 主进程有」。
+- 链接只活在 `NewsCollector.links`（`news.ts:197`）这个进程内存 Map 里，
+  `v2.ts:109` 落盘的是 `NewsData`（无 url），`:111` 回灌的也是它。
+  **冷启动那一程 `linkFor` 必然返回 undefined**，闸门给 `missing`，日志写「缓存回灌那一程还没抓到」——
+  行为与文案一致，不是 bug。
+- preload（`preload/index.ts:32-35`）只 `send(CH.openNews, id)`，桥上没有任何能传 URL 的方法。
+
+**⚠️ 「只取 links.aihot 不回退原文」——准确说法要修一个字**
+置信度：高 · `collectors/news.ts:95-104`
+
+`pickUrl` 的候选是 `[links.aihot, item.url]`，**确实不回退 `links.original`**（那是关键的一条），
+但它**会回退顶层 `url` 字段**。本机 fixture 的条目根本没有顶层 `url` 键（实测 `Object.keys` =
+id/title/summary/source/links/publishedAt/category/reason），所以现在走不到这条；
+可一旦 AIHOT 换了响应形状，`item.url` 是什么就由对方决定了。
+**不构成漏洞**——主进程的 `checkNewsLink` 会把任何非白名单域挡在 `shell.openExternal` 之前，
+纵深防御在这里正好兑现。但汇报口径写成「只取 links.aihot」会让下一个人以为数据层已经封死。
+建议要么删掉 `item.url` 这个候选，要么在 `pickUrl` 里就套一次 `allowedNewsHost`。
+
+（另：`news.ts:92` 的注释把主进程那个函数叫 `safeNewsUrl`，实际名字是 `checkNewsLink`，顺手改一下。）
+
+**⚠️ `shell.openExternal` 有两个调用点，闸门只管住了一个**
+置信度：高（机制确定）· `index.ts:171`（过闸门）vs `window.ts:87`（未过闸门）
+
+```ts
+// window.ts:86-90 —— 面板窗口的 setWindowOpenHandler
+if (url.startsWith('https://')) void shell.openExternal(url)
+```
+
+这条是 M1 遗留的（那时 E 页还是 `a[target=_blank]`）。它对 URL 只有「以 https:// 开头」一个判据，
+**不过域名白名单**。所以对「`shell.openExternal` 之前是否只可能收到通过闸门的 URL」这个问题，
+准确答案是：**今天是，但不是因为闸门管住了全部出口，而是因为另一个出口目前无人可达。**
+
+我按可达性正查了一遍，结论是当前**不可达**：
+- `renderer/app.ts` 全文没有 `window.open`，也没有任何 `<a>`（E 页的行是 `<button data-news>`，`:680`）；
+- 新闻文本一律经 `esc()`（`:188-189`，转 `& < > "`）后插进**双引号**属性与文本节点，构不出 `<a>`；
+- CSP `default-src 'none'`，`will-navigate` 全拦。
+
+但它是一条「下一次有人在面板里写一个 `<a target="_blank">` 或 `window.open` 就自动绕过白名单」的路。
+既然 E 页已经改成不持有 URL，这个 handler 也没有理由再保留 https 分支——
+改成和 `connect.ts:101-104` 一样无条件 `deny` 即可（那边本轮刚这么改过）。记 **P2**。
+
+**小记**：`tests/newslink.test.ts:69` 的用例名写「用户信息 / 端口这类花样过不了域名这关」，
+但 `:72` 断言的是 `https://aihot.news:8443/items/x` 的 `ok === true`（端口**放行**，只要主机在白名单里）。
+行为本身没问题（同一台主机），是用例名与断言对不上，容易误导下一个读的人。
+
+### 10.2 `collectors/events/titles.ts`
+
+**✅ 全程只读、不改 mtime**。全文对文件系统只用 `readdir` / `stat` / `readFile(p,'utf8')` /
+`open(this.index, 'r')` + `fh.read(...)` / `watch`。我正查了一遍
+`writeFile|appendFile|unlink|rename|chmod|utimes|open(...,'w'|'a')`——**0 命中**。
+`open(..., 'r')` 只可能影响 atime，不碰 mtime。用户桌面端的账本是安全的。
+
+**✅ 异常 JSON 不崩**，三层兜住：
+- `parseClaudeSession`（`:66-77`）/ `parseCodexIndexLine`（`:80-96`）逐字段 `typeof` 校验，坏的返回 `null`；
+  后者的 `JSON.parse` 单独包 try——注释写明「整份文件不能被一行毁掉」；
+- `scanClaude` 每个文件各包一层 try（`:196-204`），注释点名「正在写一半的 JSON / 刚被删掉：下一轮再说」；
+- `scan()`（`:167-178`）整体 try/catch → 只 log。
+用例 `:58-66`（缺字段 / 空标题 / 不是对象）、`:90-96`（坏行、空行、缺字段）、`:202`（两处都不存在时安静返回）覆盖到。
+
+**✅ 递归深度**：`walk(d, depth)` 6 层封顶（`:186`），注释说明为什么不能写死两层
+（层数是桌面端的实现细节，写死了将来会「静默地一条标题都读不到」——最难查的那一类）。
+用例 `:127`「埋在两层目录下也找得到」。
+
+**✅ Codex 增量读**：`size < codexOffset → 归零`（`:213`，被截短时从头来，用例 `:186`）；
+`size === codexOffset → return`；单次 `MAX_CHUNK = 2 MB` 封顶，剩下的下一轮接着读；
+半行 `lines.pop()` 留到下一轮，offset 只推进到最后一个换行（`:227-230`，用例 `:170`）。
+`codexOffset += bytesRead - Buffer.byteLength(tail, 'utf8')` 用**字节数**而不是字符数，中文标题不会算错。✅
+
+**✅ `Feed.retitle` 只改 title**：`feed.ts:85-93` 是 `{ ...e, title }`，其余字段整份带过；
+`e.title === title` 时原对象直接返回（不产生新引用，调用方据此不写盘不重画）。
+用例 `:211-275` 8 条，逐条钉住「id / 已读 / 种类 / 时间一个都不动」「没有 sessionId 的不误伤」
+「已读的那条也改」「agent + sessionId 两个都认，不串台」「一样就返回 0」「标题先到 → 0」。
+
+**mtime 缓存的正确性**——有一处顺序值得改（**P2**，置信度：中）·`titles.ts:199-201`
+
+```ts
+const m = (await stat(p)).mtimeMs
+if (this.seenAt.get(p) === m) continue
+this.seenAt.set(p, m)                       // ← 先记
+this.offer(parseClaudeSession(JSON.parse(await readFile(p, 'utf8'))))   // ← 后读
+```
+
+mtime 在**读之前**就记下了。若这一次正好读到一份写了一半的 JSON（`JSON.parse` 抛，被外层 try 吞掉），
+这个文件就会被**一直跳过，直到它的 mtime 再变一次**。桌面端多半是写临时文件再 rename（rename 会带来新 mtime），
+所以实际大概率自愈；但正确的顺序是「解析成功之后再记 mtime」，代价为零。
+缓存本身的方向是对的——它挡的正是 M3 §5 那个形状（5 s 轮询把本机 65 份整读一遍，随会话数单调变差）。
+
+另两条小的：
+- `seenAt` 是**只增 Map**，文件删了也不清（同 §5.6 那一类）。本机 65 条量级，不阻塞。
+- `MONITOR_CLAUDE_SESSIONS_DIR` / `MONITOR_CODEX_INDEX` 两个环境变量**没有关在 `app.isPackaged` 后面**，
+  与 P1-② 刚刚给 `MONITOR_KEYCHAIN_SERVICE` 定下的先例不一致。危害远低于那一条
+  （这两个只能让 app 去**读**另一个目录，读到的文本还要过 `oneLine` + `clip(80)` 再进 DOM，
+  且渲染层用 `esc()`），最坏是在自己屏幕上伪造几行会话标题。记 P2，按同一条原则收口即可。
+
+### 10.3 `app.css` STAGE 段之外新增的 button 重声明
+
+**✅ 值与原型逐字一致，且新增项只做默认外观覆盖。**
+我把 `app.css:505-513` 与原型 `design/variations.html:925-933` 逐条对齐过：
+
+| 声明 | 原型 `a.e-item` | Electron `button.e-item` | 判定 |
+|---|---|---|---|
+| `text-decoration` | `none` | `none` | 逐字相同 |
+| `color` | `inherit` | `inherit` | 逐字相同 |
+| `border-radius` | `var(--r-sm)` | `var(--r-sm)` | 逐字相同 |
+| `margin-inline` | `calc(var(--sp-xs) * -1)` | `calc(var(--sp-xs) * -1)` | 逐字相同 |
+| `padding-inline` | `var(--sp-xs)` | `var(--sp-xs)` | 逐字相同 |
+| `transition` | `background var(--dur-state) var(--ease-standard)` | 同左 | 逐字相同 |
+| `:hover` | `background:var(--surface)` | 同左 | 逐字相同 |
+| `:focus-visible` | `outline:none;box-shadow:0 0 0 2px var(--accent)` | 同左 | 逐字相同 |
+| `:hover/:focus .e-go` | `color:var(--ink)` | 同左 | 逐字相同 |
+
+新增的 7 条全部是 UA 默认值的中和，没有一条引入新的视觉决策：
+`appearance:none` / `background:none` / `border:0` / `font:inherit` / `text-align:inherit`
+（这五条纯粹是把浏览器给 `<button>` 的 ButtonFace 底、1px 边框、居中、系统字体清掉）、
+`padding-block:0`（UA 给 button 的是 1px，`<a>` 本来是 0，这是**对齐锚点**而不是改版式）、
+`cursor:pointer`（`<a href>` 的 UA 默认就是 pointer，button 是 default——同样是**还原**锚点行为，
+且与画布里 `.dots button` / `.edge` 的既有写法一致）。
+`.page-e .e-go`、`.page-e .e-item` 这些不带标签限定的规则没有被重复声明，正确。
+
+**⚠️ 这份副本没有任何东西盯着它与原型同步（P2，置信度：高）**
+`tests/stage-css-port.test.ts` 的 `portedStage()` 取的是 `STAGE_HEAD → HARNESS_HEAD` 之间那一段，
+而这个 button 块在文件**末尾、harness 之后**，落在断言范围之外。
+于是：designer 改了原型的 `a.e-item`，`stage-css-port` 会红在 STAGE 那一半，
+**button 这一半会静默落后**——而它正是 E 页真正生效的那一份。
+文件里的注释已经说了「改样式请改原型，不要改这里」，但那是一句纪律，不是一条断言。
+补一条很轻的测试即可：把原型 `a.e-item` 那几条的**值**抽出来，与 `button.e-item` 块里同名属性逐一比对。
+
+（另：原型的点击守卫里有 `|| attnActive`（`variations.html:3372`），Electron 版的
+`app.ts:1047-1054` 没有这一条。实际不需要——非当前页由 `app.css:89-91` 的
+`pointer-events:none` 加 `app.ts:826` 的 `inert` 双重挡住，attention 接管时 E 页点不到。已核，不记问题。）
+
+### 10.4 复验 2 判定：**可提交**
+
+**P0 = 0，P1 = 0，P2 = 16。**
+
+两块新代码的安全形状都立得住。`newslink.ts` 把「唯一一处把外部输入交给 OS 的地方」抽成了
+可以被正面打的纯函数，四道闸门（sender / id / 协议 / 域名）各自独立、各有用例，
+后缀相似域这一类最容易写错的判据用的是「点号写在前缀里」这个正确写法，并且有反例用例钉着。
+「渲染层不持有 URL」这条做到了架构层面——不是靠自觉，而是靠一条读源码的断言 + 一条跑 fixture 的断言。
+`titles.ts` 对用户桌面端账本的只读纪律经得起正查（写操作 0 命中），
+异常 JSON 三层兜底，增量读的字节记账与半行处理都对，`retitle` 是纯粹的字段替换且有 8 条用例。
+
+本轮新增 4 条 P2（§10.1 的 `pickUrl` 回退顶层 `url`、`window.ts:87` 第二个未过闸门的
+`openExternal`、§10.2 的 mtime 先记后读、§10.3 的 button 副本无人盯同步），
+外加两条口径 / 命名上的小记（`safeNewsUrl` 注释名、端口用例名）与两条与既有条目同类的
+（`seenAt` 只增归入 §5.6、两个 titles 环境变量归入 P1-② 的同一条原则）。
+加上此前挂着的 11 条，**P2 共 16 条，仍无一条阻塞提交**。
+
+若要挑一条现在就做：**`window.ts:87` 改成无条件 `deny`**。E 页已经不持有 URL 了，
+那个 https 分支失去了存在理由，而留着它就等于在白名单之外留了第二个出口——
+今天不可达，靠的是「渲染层碰巧没有 `<a>`」这种会被下一次改动推翻的前提。

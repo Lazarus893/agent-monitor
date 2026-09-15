@@ -12,6 +12,7 @@ import type { Store } from '../../state.js'
 import { CodexEvents } from './codex.js'
 import { ClaudeEvents } from './claude.js'
 import { ZcodeEvents } from './zcode.js'
+import { TitleIndex } from './titles.js'
 import { Saver, load } from './persist.js'
 import type { EventCollector, EventInput, EventSink } from './types.js'
 
@@ -26,6 +27,8 @@ export type EventsHandle = {
   codex: CodexEvents
   zcode: ZcodeEvents
   claude: ClaudeEvents
+  /** 桌面端的会话标题索引（C1/C2 的行名） */
+  titles: TitleIndex
 }
 
 export function startEvents(store: Store, userData: string): EventsHandle {
@@ -34,9 +37,24 @@ export function startEvents(store: Store, userData: string): EventsHandle {
   store.restoreEvents(load(userData))
 
   let booted = false
+  /* 标题索引先建、后起：事件产生的那一刻要能问它「这个 session 叫什么」，
+     问到就直接用桌面端的名字，问不到才落到回退标题（首条提问 / transcript summary）。 */
+  const titles = new TitleIndex({
+    title(hit) {
+      /* 标题通常在第一轮结束之后才生成，所以多数时候事件已经在列表里了 —— 原地改名。
+         改到 0 条是正常的（标题先到、事件后到），那一份留在索引里，
+         等 emit 的时候由下面那一行认领。 */
+      const n = store.retitleSession(hit.agent, hit.sessionId, hit.title)
+      if (n) console.log(`[titles] ${hit.agent} ${hit.sessionId.slice(0, 8)} → "${hit.title}"（${n} 条）`)
+    },
+    log(line) { console.log(line) }
+  })
+
   const sink: EventSink = {
     emit(input: EventInput): void {
-      store.ingestEvent(input, booted)
+      // 索引里已经有名字就直接用它，别让回退标题先闪一下再被改掉
+      const better = input.sessionId ? titles.titleFor(input.agent, input.sessionId) : undefined
+      store.ingestEvent(better ? { ...input, title: better } : input, booted)
     },
     status(agent: AgentId, status: AgentStatus): void {
       store.setEventStatus(agent, status)
@@ -49,7 +67,7 @@ export function startEvents(store: Store, userData: string): EventsHandle {
   const codex = new CodexEvents(sink)
   const claude = new ClaudeEvents(sink)
   const zcode = new ZcodeEvents(sink)
-  const all: EventCollector[] = [codex, claude, zcode]
+  const all: EventCollector[] = [codex, claude, zcode, titles]
 
   // 三家并行起。全部回灌完才翻 booted —— 任何一家还在回灌时翻，它剩下的历史就会被当新事件。
   const ready = Promise.all(all.map(c => Promise.resolve(c.start()).catch(err => {
@@ -74,7 +92,8 @@ export function startEvents(store: Store, userData: string): EventsHandle {
     ready,
     codex,
     claude,
-    zcode
+    zcode,
+    titles
   }
 }
 

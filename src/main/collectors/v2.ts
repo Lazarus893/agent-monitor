@@ -37,7 +37,11 @@ function writeCache(userData: string, name: string, data: unknown): void {
   } catch { /* 缓存写不进去不影响本轮显示 */ }
 }
 
-export type V2Handle = { stop(): void }
+export type V2Handle = {
+  stop(): void
+  /** E 页点开某条时用：条目 id → 站内阅读页；没有就 undefined */
+  newsLink(id: string): string | undefined
+}
 
 export function startV2(
   store: Store,
@@ -112,6 +116,10 @@ export function startV2(
       if (usageTimer) clearTimeout(usageTimer)
       if (modelTimer) clearTimeout(modelTimer)
       news.stop()
+    },
+    /** E 页点开某条时用：条目 id → 站内阅读页。主进程还要再过一道域名校验。 */
+    newsLink(id: string): string | undefined {
+      return news.linkFor(id)
     }
   }
 }

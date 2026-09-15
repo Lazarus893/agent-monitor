@@ -1,7 +1,8 @@
 /* ==========================================================================
    画布样式 —— 逐行取自 design/variations.html 第三个 <style> 块（STAGE 段）的 v2 版。
    design/tokens.css 仍是唯一样式真源：app.ts 直接 import 它，这里一个 token 都不抄。
-   只有四处改动，都因为「浏览器里的一块 stage」变成了「一整块屏」：
+   四处改动都因为「浏览器里的一块 stage」变成了「一整块屏」（第五处在文件末尾，
+   理由不同：E 页的行在 Electron 版是 button 不是 a）：
      1. .stage 去掉 border-radius / box-shadow —— 原型用它们把画布从灰底上框出来，
         副屏上没有底，框线就成了一圈杂边。
      2. body 直接是 --canvas，无 padding —— 窗口 bounds 就是整块屏。
@@ -315,11 +316,13 @@ body{margin:0;background:var(--canvas);overflow:hidden;
 
 /* ==========================================================================
    D 页 · 每日用量热力图
-   配色决定：不用 GitHub 的绿，也不用 --accent-blue —— 蓝会和 ZCode 的身份色
-   #6f93e6 混淆。改用系统里已经在承担「数据」职责的那条中性阶：0 档是
-   --surface-elevated，1–4 档沿 --charcoal 方向的中性明度阶。同一色相（中性）、
-   无渐变，且顶档就是 --charcoal，与额度填充 --quota-fill 同色，含义一致：
-   「这是数据，不是强调」。格子不按 agent 分色，只按总量分档。
+   配色决定（REVISION 9 · 用户 2026-09-15 追加，覆盖原来的中性阶）：1–4 档改成
+   同一绿色相的明度阶，色相 159.65° 取自 --ok 的 oklch，顶档就是 --ok 本体；
+   0 档仍是 --surface-elevated（「没有用量」属于背景，不该有颜色）。
+   明度按 WCAG 等比排，相邻四档 1.77 / 1.77 / 1.79 / 1.81:1——上一版中性阶最难的
+   0→1 只有 1.35，这一步正面回答 D-2「五档在小格上不可分」。
+   绿只在这一页出现，不是身份色（charcoal / 橙 / 蓝）也不是 accent（#f4f4f6），
+   不参与那两套计数。格子仍不按 agent 分色，只按总量分档。
    ========================================================================== */
 .page-d .dwrap{flex:1;display:flex;flex-direction:column;gap:var(--sp-sm);min-height:0}
 .page-d .d-head{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-sm);flex:none;height:20px}
@@ -328,12 +331,12 @@ body{margin:0;background:var(--canvas);overflow:hidden;
 /* D-4 · 页眉右侧原来挂着三个身份色圆点的图例，而正下方是一张完全按总量分档的
    中性网格——图例承诺了一个不存在的 encoding，比没有图例更糟。
    删掉圆点，位置交给「这一格是哪一天」（与 E 页页眉右侧的更新时间同一个槽位、
-   同一个职责：这屏说的是哪个时刻），分档说明用一句话接在标题后面——
-   一个说得清 encoding 的句子，比五个说不清的色块便宜也诚实。
-   三家的实际数值下移到说明行（见 .d-nums 那段的宽度账）。 */
-.page-d .d-hint{flex:1;min-width:0;font-size:var(--fs-min);color:var(--mute);line-height:1;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.page-d .d-date{flex:none;font-family:var(--font-num);font-feature-settings:var(--num-features);
+   同一个职责：这屏说的是哪个时刻）。
+   REVISION 9：原来接在标题后的那句「颜色越亮用得越多」也删掉——绿色阶本身已经
+   是一条从暗到亮的序列，写出来是对图形的文字复述（同 A-1 的「后重置」）；
+   页眉只留标题与日期，三家的实际数值在说明行（见 .d-nums 那段的宽度账）。 */
+.page-d .d-date{flex:none;
+  font-family:var(--font-num);font-feature-settings:var(--num-features);
   font-variant-numeric:tabular-nums;font-size:var(--fs-min);color:var(--ink);
   white-space:nowrap;line-height:1}
 /* D-1 · 格子尺寸不再写死 13px，由 renderPageD 推出：
@@ -395,8 +398,21 @@ body{margin:0;background:var(--canvas);overflow:hidden;
    但拉丁名不是——「Gary Marcus」85px、「Hacker News」88px，34% 只给到 67px，
    于是屏上是「Gary M…」，和「公众号：…」一样读不出是谁。40% 给到 88px，
    今天三条真实来源全数完整；代价是标题列 221→198px，而标题本来就按行数省略，
-   少 10% 只是省略号早一点，来源少一半却是署名消失。 */
-.page-e .e-item{flex:1;min-height:0;display:grid;grid-template-columns:18px minmax(0,1fr) minmax(0,40%);
+   少 10% 只是省略号早一点，来源少一半却是署名消失。
+   REVISION 9 · 整行可点（外链图标 16px + gap 4 进了 .e-meta），第三列再提到 45%：
+   来源 90px 仍放得下「Hacker News」88px，标题列 198 → 179px。
+   负 margin + 等量 padding：hover 高亮向外多探 4px，而文字左右边缘与页眉页脚仍对齐——
+   不这么做的话，要么高亮贴着文字没有呼吸，要么整列内容被 padding 推进去 4px。 */
+.page-e a.e-item{text-decoration:none;color:inherit;border-radius:var(--r-sm);
+  margin-inline:calc(var(--sp-xs) * -1);padding-inline:var(--sp-xs);
+  transition:background var(--dur-state) var(--ease-standard)}
+.page-e a.e-item:hover{background:var(--surface)}
+.page-e a.e-item:focus-visible{outline:none;box-shadow:0 0 0 2px var(--accent)}
+.page-e .e-go{align-self:center;flex:none;color:var(--mute);display:inline-flex;
+  transition:color var(--dur-state) var(--ease-standard)}
+.page-e a.e-item:hover .e-go,
+.page-e a.e-item:focus-visible .e-go{color:var(--ink)}
+.page-e .e-item{flex:1;min-height:0;display:grid;grid-template-columns:18px minmax(0,1fr) minmax(0,45%);
   column-gap:var(--sp-sm);align-items:center}
 .page-e .e-no{font-family:var(--font-num);font-feature-settings:var(--num-features);
   font-variant-numeric:tabular-nums;font-size:var(--fs-min);color:var(--mute);text-align:right;line-height:1}
@@ -410,7 +426,6 @@ body{margin:0;background:var(--canvas);overflow:hidden;
   display:flex;align-items:baseline;justify-content:flex-end;gap:var(--sp-xs)}
 .page-e .e-src{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .page-e .e-time{flex:none;white-space:nowrap}
-.page-e .e-foot{flex:none;height:18px;font-size:var(--fs-min);color:var(--mute);line-height:18px}
 
 /* ==========================================================================
    attention 页 · 整屏只为这一件事
@@ -473,3 +488,26 @@ html[data-debug="1"] .harness{display:flex}
 .hcheck input{accent-color:#8ab4ff;width:13px;height:13px;cursor:pointer}
 .hmeter{font:11px/1 ui-monospace,SFMono-Regular,Menlo,monospace;color:#8ab4ff;
   background:#25272a;border:1px solid #3c3f44;border-radius:6px;padding:6px 8px;min-width:170px}
+
+/* ==========================================================================
+   Electron 版的第五处差异（其余四处见文件头）：E 页的行是 <button> 不是 <a>。
+
+   原型用 `a[href][target=_blank]` —— 那是浏览器里的做法。本项目按 brief-m0-v2 §8
+   **渲染层不持有 URL**：行是个 button，点击只把条目 id 发给主进程，
+   由主进程取出 links.aihot、校验 https 与域名之后才交给系统浏览器。
+
+   代价是 STAGE 段里那几条 `.page-e a.e-item{…}` 是**带标签限定**的，对 button 不生效，
+   于是行会带上浏览器给 button 的默认外观：ButtonFace 底、1px 边框、居中、系统字体。
+   （实测：五行全变成浅灰底、标题发暗——第一版截图就是这样。）
+   所以这里把那几条按 button 再声明一遍，并把默认外观清掉。
+   **值一个字都不改**，与上面 a.e-item 的那几条逐字对应；改样式请改原型，不要改这里。
+   ========================================================================== */
+.page-e button.e-item{appearance:none;background:none;border:0;padding-block:0;
+  font:inherit;color:inherit;text-align:inherit;cursor:pointer;
+  text-decoration:none;border-radius:var(--r-sm);
+  margin-inline:calc(var(--sp-xs) * -1);padding-inline:var(--sp-xs);
+  transition:background var(--dur-state) var(--ease-standard)}
+.page-e button.e-item:hover{background:var(--surface)}
+.page-e button.e-item:focus-visible{outline:none;box-shadow:0 0 0 2px var(--accent)}
+.page-e button.e-item:hover .e-go,
+.page-e button.e-item:focus-visible .e-go{color:var(--ink)}

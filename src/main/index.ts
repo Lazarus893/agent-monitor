@@ -8,7 +8,7 @@
  *   · 渲染进程崩溃自动 reload。
  */
 
-import { app, ipcMain, Menu } from 'electron'
+import { app, ipcMain, Menu, shell } from 'electron'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { MonitorWindow } from './window.js'
@@ -26,6 +26,7 @@ import { installCrashGuards, logDir, startLogging } from './log.js'
 import { TrayMenu } from './tray.js'
 import { closeConnectWindow, hasZcodeKey, openConnectWindow } from './connect.js'
 import { setKeychainOverrideAllowed } from './collectors/quota/keychain.js'
+import { REASON_TEXT, checkNewsLink, validNewsId } from './newslink.js'
 
 const SHOOT = process.env.MONITOR_SHOOT === '1'
 const SELFTEST = process.env.MONITOR_SELFTEST === '1'
@@ -150,8 +151,28 @@ async function main(): Promise<void> {
     // M1 页码由渲染层的 pager 持有，主进程只记录，不回推（回推会和本地状态机打架）
     if (fromPanel(e) && DEBUG) console.log(`[page] ${page}`)
   })
-  // 采集器在窗口加载完之后才 start（见下），这里先留个引用给 dev IPC 用
+
+  /* E 页点开一条新闻（brief-m0-v2 §8）。
+     渲染层只递 id；链接从新闻缓存里取，过完协议与域名白名单才交给系统浏览器。
+     这是整个项目唯一一处把外部输入交给 OS 的地方，所以三道都写在明处：
+     sender 是不是面板、id 像不像个 id、链接过不过闸门。任何一道不过就只记一行。 */
+  ipcMain.on(CH.openNews, (e, id: unknown) => {
+    if (!fromPanel(e)) return
+    if (!validNewsId(id)) {
+      console.warn('[news] 打开请求被拒：id 不合法')
+      return
+    }
+    const check = checkNewsLink(v2?.newsLink(id))
+    if (!check.ok) {
+      console.warn(`[news] 不打开 ${id}：${REASON_TEXT[check.reason]}`)
+      return
+    }
+    console.log(`[news] 打开 ${id}`)
+    void shell.openExternal(check.url)
+  })
+  // 采集器在窗口加载完之后才 start（见下），这里先留个引用给 dev IPC / 新闻链接用
   let quota: ReturnType<typeof startQuota> | null = null
+  let v2: ReturnType<typeof startV2> | null = null
 
   if (!app.isPackaged) {
     ipcMain.on(CH.dev, (e, msg: DevMessage) => {
@@ -318,7 +339,7 @@ async function main(): Promise<void> {
       : SHOOT ? join(app.getPath('temp'), 'agent-monitor-shoot')
         : app.getPath('userData'))
   const events = SHOOT ? null : startEvents(store, dataDir)
-  const v2 = SHOOT || !events ? null : startV2(store, dataDir, events, app.getVersion())
+  v2 = SHOOT || !events ? null : startV2(store, dataDir, events, app.getVersion())
   app.on('will-quit', () => { v2?.stop(); events?.stop() })
 
   // 工具脚本动态 import：截图与自检代码不该出现在生产 main bundle 里（复核 P2-5.3）

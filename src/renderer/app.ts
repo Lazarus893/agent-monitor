@@ -132,6 +132,9 @@ const ICON = {
   hour: '<path d="M4.5 2.6h7M4.5 13.4h7"/><path d="M5.6 2.6v2.1L8 7.1l2.4-2.4V2.6"/><path d="M5.6 13.4v-2.1L8 8.9l2.4 2.4v2.1"/>',
   wifi: '<path d="M2.3 6.1a9.2 9.2 0 0 1 3.1-1.8"/><path d="M13.7 6.1a9.2 9.2 0 0 0-4.4-2"/><path d="M4.8 8.7a5.6 5.6 0 0 1 1.7-1"/><path d="M11.2 8.7a5.6 5.6 0 0 0-1.3-.8"/><path d="M8 11.9h.01"/><path d="M2.4 2.4 13.6 13.6"/>',
   inbox: '<path d="M2.2 9.4h3.1l.9 1.9h3.6l.9-1.9h3.1"/><path d="M3.5 3.1h9l1.3 6.3v3.5H2.2V9.4z"/>',
+  /* E 页行尾的外链标记（REVISION 9）：monoline，与其余图标同一套描边 */
+  linkout: '<path d="M9.4 3.2h3.4v3.4"/><path d="M12.8 3.2 7.7 8.3"/>' +
+    '<path d="M11.9 9.5v2.7a1.4 1.4 0 0 1-1.4 1.4H3.8a1.4 1.4 0 0 1-1.4-1.4V5.5a1.4 1.4 0 0 1 1.4-1.4h2.7"/>',
   radio: '<circle cx="8" cy="8" r="1.6"/><path d="M4.8 11.2a4.5 4.5 0 0 1 0-6.4"/><path d="M11.2 4.8a4.5 4.5 0 0 1 0 6.4"/><path d="M2.4 2.4 13.6 13.6"/>',
   dot: '<circle cx="8" cy="8" r="3.2"/>'
 } as const
@@ -595,7 +598,6 @@ function renderPageD(): void {
   const weeks = usage.weeks || Math.round(shown.length / 7)
   el.pdHeat.innerHTML = `
     <div class="d-head"><span class="d-title">每日用量 · 近 ${weeks} 周</span>
-      <span class="d-hint">颜色越亮用得越多</span>
       <span class="d-date" id="dDate"></span></div>
     <div class="d-grid" style="--cell-w:${cellW}px;--cell-h:${cellH}px">
       <div class="d-days">${DAY_LABEL.map(x => `<span>${x}</span>`).join('')}</div>
@@ -675,7 +677,7 @@ function renderPageE(): void {
     <div class="e-head"><span class="e-title">今日 AI · AIHOT</span>
       <span class="e-upd"${st === 'error' ? '' : ` data-when="${esc(updated)}"`}>${
         st === 'error' ? '连不上 · 显示缓存' : ''}</span></div>
-    <div class="e-list">${items.map((it, i) => `<div class="e-item">
+    <div class="e-list">${items.map((it, i) => `<button type="button" class="e-item" data-news="${esc(it.id)}">
         <span class="e-no">${i + 1}</span>
         <span class="e-t">${esc(it.title)}</span>
         <span class="e-meta"><span class="e-src">${esc(it.source ?? 'AIHOT')}</span>
@@ -683,9 +685,9 @@ function renderPageE(): void {
                那是因为原型没有采集层；本项目的 it.source 只有一个来源，就是
                collectors/news.ts 的 shortSource()，规则连同实测样本的用例都在那边。
                渲染层再写一份，就是第二处会漂移的真源 —— 和 tokens.css 只留一份是同一条纪律。 -->
-          <span class="e-time" data-newswhen="${esc(it.at ?? updated)}"></span></span>
-      </div>`).join('')}</div>
-    <div class="e-foot">数据来源：AIHOT</div>`
+          <span class="e-time" data-newswhen="${esc(it.at ?? updated)}"></span>
+          <span class="e-go">${svg('linkout', 16)}</span></span>
+      </button>`).join('')}</div>`
   /* 标题行数由实测行高决定，不按画布高度一刀切：3 条时每条放得下两行，
      满 5 条时每条只剩 27px，自动退回一行。 */
   const list = el.peNews.querySelector<HTMLElement>('.e-list')
@@ -1036,6 +1038,20 @@ const onFeedClick = (e: Event): void => {
 }
 el.pc1Feed.addEventListener('click', onFeedClick)
 el.pc2Feed.addEventListener('click', onFeedClick)
+
+/* E 页：点一条就在系统浏览器里打开它（brief-m0-v2 §8）。
+   这里**只发 id** —— 链接、协议与域名白名单都在主进程（见 main/newslink.ts）。
+   行本身是 `<button>`，所以 Enter / Space 由浏览器直接派成 click，不用再听一次键盘。
+   与 C 页不同：不 ack、不计未读、不打断轮播；但这是一次真实的手动交互，
+   所以按既有规则把轮播暂停 120 s —— 用户正要去看这条，别在他眼皮底下翻页。 */
+el.peNews.addEventListener('click', e => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('.e-item[data-news]')
+  if (!b) return
+  markUserInput()
+  pg = manual(pg, 'e', Date.now(), cfg)
+  applyPage()
+  window.monitor.openNews(b.dataset.news!)
+})
 
 /* ---------- 手动切换：键盘 / 指示点 / 边缘热区 ---------- */
 

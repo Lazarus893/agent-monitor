@@ -8,7 +8,9 @@ export const CH = {
   ack: 'monitor:ack',
   setPage: 'monitor:set-page',
   rendered: 'monitor:rendered',
-  dev: 'monitor:dev'
+  dev: 'monitor:dev',
+  /** renderer → main：打开某条新闻（只带 id，链接由主进程解析与校验） */
+  openNews: 'monitor:open-news'
 } as const
 
 /* 「连接 ZCode」窗口的两条频道不在这里 —— 见 shared/connect-ipc.ts 文件头，

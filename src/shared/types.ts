@@ -126,13 +126,20 @@ export type UsageData = {
   error?: NoticeCode
 }
 
-/** AIHOT 的一条。全部当**不可信文本**：只渲染为纯文本，不注入 HTML、不预取 url。 */
+/**
+ * AIHOT 的一条。全部当**不可信文本**：只渲染为纯文本，不注入 HTML、不预取任何链接。
+ *
+ * **这里没有 url，是有意的**（brief-m0-v2 §8）。E 页的行可以点开，但渲染层
+ * 从头到尾不持有链接：它只把 `id` 发给主进程，由主进程从新闻缓存里取出那条的
+ * AIHOT 站内阅读页，校验协议与域名之后才 `shell.openExternal`。
+ * 链接是**来自网络的不可信字符串**，让它进渲染层就等于把它放进一个
+ * 随时可能被当成 href 用的地方。
+ */
 export type NewsItem = {
   id: string
   title: string
   summary?: string
   source?: string
-  url?: string
   /** publishedAt，ISO */
   at?: string
   reason?: string
@@ -229,6 +236,11 @@ export type MonitorApi = {
   setPage(page: Page): void
   /** 截图脚本用：渲染层画完一帧后回报，带回指令里的 token */
   rendered(token: number): void
+  /**
+   * E 页：把某条新闻在系统浏览器里打开。
+   * **只发 id**，不发 URL —— 链接与校验都在主进程那边（见 NewsItem 的注释）。
+   */
+  openNews(id: string): void
   /**
    * 调试栏用的那几个模拟入口。**打包产物里不存在**（preload 里按构建期常量挂上），
    * 所以是可选的 —— 调用点必须写 `?.`，这正是它的真实形态。

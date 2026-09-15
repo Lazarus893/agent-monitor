@@ -28,6 +28,10 @@ const api: MonitorApi = {
   },
   rendered(token: number) {
     ipcRenderer.send(CH.rendered, token)
+  },
+  openNews(id: string) {
+    // 只递一个 id。链接在主进程那边取与校验（shared/types.ts 的 NewsItem 注释说明了理由）
+    ipcRenderer.send(CH.openNews, id)
   }
 }
 

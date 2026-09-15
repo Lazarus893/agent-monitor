@@ -73,6 +73,25 @@ export class Feed {
     return ev
   }
 
+  /**
+   * 原地改标题（桌面端的会话名在事件之后才生成，见 titles.ts）。
+   *
+   * **只动 title**：id、acked、kind、时间、排序全部不碰 —— 这不是一条新事件，
+   * 是同一条事情有了更好的名字。碰了 id 就会重新计未读、重新响铃、重新跳 C 页，
+   * 而用户什么也没做。
+   * 返回改了几条：0 表示这个 session 还没有事件（标题先到、事件后到），
+   * 调用方据此决定要不要记日志。
+   */
+  retitle(agent: AgentId, sessionId: string, title: string): number {
+    let n = 0
+    this.events = this.events.map(e => {
+      if (e.agent !== agent || e.sessionId !== sessionId || e.title === title) return e
+      n++
+      return { ...e, title }
+    })
+    return n
+  }
+
   ack(id: string): boolean {
     let hit = false
     this.events = this.events.map(e => {

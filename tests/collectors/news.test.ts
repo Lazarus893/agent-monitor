@@ -44,14 +44,22 @@ describe('parseItems', () => {
     expect(a!.summary).toBe('权重和评测代码已公开，数据与训练配方将陆续公布。')
     // E-1 起 source 已经是收过的主名（渠道前缀剥掉），见下面的 shortSource 那一组
     expect(a!.source).toBe('某技术团队')
-    expect(a!.url).toBe('https://aihot.news/items/cmu12ocst0b6nro2nypi25zyq')
+    // url 不再进 NewsItem（brief-m0-v2 §8）；链接走 parseFeed().links，见下面那一组
     expect(a!.at).toBe('2026-09-14T09:59:00.000Z')
     expect(a!.reason).toBe('给出了完整训练思路。')
   })
 
-  it('AIHOT 阅读页优先于原文', () => {
+  it('只取 AIHOT 站内阅读页，**不退回原文**（brief-m0-v2 §8 的域名白名单要挡的就是它）', () => {
     expect(pickUrl(RESPONSE.items[0] as Record<string, unknown>)).toContain('aihot.news')
-    expect(pickUrl(RESPONSE.items[1] as Record<string, unknown>)).toBe('https://example.com/b')
+    // items[1] 只有 links.original（example.com），不该被当成可打开的链接
+    expect(pickUrl(RESPONSE.items[1] as Record<string, unknown>)).toBeUndefined()
+  })
+
+  it('顶层 url 字段仍是退路（老形状的响应）', () => {
+    expect(pickUrl({ url: 'https://aihot.news/items/x' })).toBe('https://aihot.news/items/x')
+    // 协议不对的一律不收，连进内存都不进
+    expect(pickUrl({ url: 'javascript:alert(1)' })).toBeUndefined()
+    expect(pickUrl({ links: { aihot: 'data:text/html,x' } })).toBeUndefined()
   })
 
   it('source 两种编码都认', () => {

@@ -401,14 +401,20 @@ accent
      下发系数），不归这里。 */
   --panel-x: 1.19;
 
-  /* D 页热力图五档。0 档用 surface 阶梯，1–4 档是中性明度阶——不用 GitHub 的绿，
-     也不用 --accent-blue（会和 ZCode 的身份色 #6f93e6 混淆）。顶档就是 --charcoal，
-     与 --quota-fill 同色：在这套系统里它一贯的含义是「这是数据，不是强调」。 */
+  /* D 页热力图五档。REVISION 9（用户 2026-09-15 追加，覆盖 brief 第 3 条的「不用
+     GitHub 的绿」与上一版的中性阶）：1–4 档改成同一绿色相的明度阶，顶档就是 --ok
+     本体，色相 159.65° 取自 --ok #59d499 的 oklch（H 只写一次，四档共用，不复制 hex）。
+     0 档仍是 surface 阶梯——「没有用量」属于背景，不该有颜色。
+     明度按 WCAG 等比排：相邻四档实测 1.77 / 1.77 / 1.79 / 1.81:1，
+     比上一版中性阶（1.35 / 1.70 / 2.44 / 2.25）均匀得多，
+     最难的 0→1 档从 1.35 提到 1.77——D-2「五档在小格上不可分」先由这一步回答。
+     绿不是身份色也不计 accent：三家身份色是 charcoal / 橙 / 蓝，accent 是 #f4f4f6。 */
+  --heat-h: 159.65;                        /* = oklch(--ok) 的色相 */
   --heat-0: var(--surface-elevated);
-  --heat-1: #2b2c2e;
-  --heat-2: #4d4f52;
-  --heat-3: #8a8c91;
-  --heat-4: var(--charcoal);
+  --heat-1: oklch(0.356 0.080 var(--heat-h));
+  --heat-2: oklch(0.488 0.105 var(--heat-h));
+  --heat-3: oklch(0.626 0.125 var(--heat-h));
+  --heat-4: var(--ok);
   --dur-page:    300ms; /* 横向滑动切页                                     */
 
   /* ==========================================================================
@@ -829,11 +835,13 @@ html[data-pure="1"] .pure-hint{position:fixed;left:50%;bottom:24px;transform:tra
 
 /* ==========================================================================
    D 页 · 每日用量热力图
-   配色决定：不用 GitHub 的绿，也不用 --accent-blue —— 蓝会和 ZCode 的身份色
-   #6f93e6 混淆。改用系统里已经在承担「数据」职责的那条中性阶：0 档是
-   --surface-elevated，1–4 档沿 --charcoal 方向的中性明度阶。同一色相（中性）、
-   无渐变，且顶档就是 --charcoal，与额度填充 --quota-fill 同色，含义一致：
-   「这是数据，不是强调」。格子不按 agent 分色，只按总量分档。
+   配色决定（REVISION 9 · 用户 2026-09-15 追加，覆盖原来的中性阶）：1–4 档改成
+   同一绿色相的明度阶，色相 159.65° 取自 --ok 的 oklch，顶档就是 --ok 本体；
+   0 档仍是 --surface-elevated（「没有用量」属于背景，不该有颜色）。
+   明度按 WCAG 等比排，相邻四档 1.77 / 1.77 / 1.79 / 1.81:1——上一版中性阶最难的
+   0→1 只有 1.35，这一步正面回答 D-2「五档在小格上不可分」。
+   绿只在这一页出现，不是身份色（charcoal / 橙 / 蓝）也不是 accent（#f4f4f6），
+   不参与那两套计数。格子仍不按 agent 分色，只按总量分档。
    ========================================================================== */
 .page-d .dwrap{flex:1;display:flex;flex-direction:column;gap:var(--sp-sm);min-height:0}
 .page-d .d-head{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-sm);flex:none;height:20px}
@@ -842,12 +850,12 @@ html[data-pure="1"] .pure-hint{position:fixed;left:50%;bottom:24px;transform:tra
 /* D-4 · 页眉右侧原来挂着三个身份色圆点的图例，而正下方是一张完全按总量分档的
    中性网格——图例承诺了一个不存在的 encoding，比没有图例更糟。
    删掉圆点，位置交给「这一格是哪一天」（与 E 页页眉右侧的更新时间同一个槽位、
-   同一个职责：这屏说的是哪个时刻），分档说明用一句话接在标题后面——
-   一个说得清 encoding 的句子，比五个说不清的色块便宜也诚实。
-   三家的实际数值下移到说明行（见 .d-nums 那段的宽度账）。 */
-.page-d .d-hint{flex:1;min-width:0;font-size:var(--fs-min);color:var(--mute);line-height:1;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.page-d .d-date{flex:none;font-family:var(--font-num);font-feature-settings:var(--num-features);
+   同一个职责：这屏说的是哪个时刻）。
+   REVISION 9：原来接在标题后的那句「颜色越亮用得越多」也删掉——绿色阶本身已经
+   是一条从暗到亮的序列，写出来是对图形的文字复述（同 A-1 的「后重置」）；
+   页眉只留标题与日期，三家的实际数值在说明行（见 .d-nums 那段的宽度账）。 */
+.page-d .d-date{flex:none;
+  font-family:var(--font-num);font-feature-settings:var(--num-features);
   font-variant-numeric:tabular-nums;font-size:var(--fs-min);color:var(--ink);
   white-space:nowrap;line-height:1}
 /* D-1 · 格子尺寸不再写死 13px，由 renderPageD 推出：
@@ -909,8 +917,21 @@ html[data-pure="1"] .pure-hint{position:fixed;left:50%;bottom:24px;transform:tra
    但拉丁名不是——「Gary Marcus」85px、「Hacker News」88px，34% 只给到 67px，
    于是屏上是「Gary M…」，和「公众号：…」一样读不出是谁。40% 给到 88px，
    今天三条真实来源全数完整；代价是标题列 221→198px，而标题本来就按行数省略，
-   少 10% 只是省略号早一点，来源少一半却是署名消失。 */
-.page-e .e-item{flex:1;min-height:0;display:grid;grid-template-columns:18px minmax(0,1fr) minmax(0,40%);
+   少 10% 只是省略号早一点，来源少一半却是署名消失。
+   REVISION 9 · 整行可点（外链图标 16px + gap 4 进了 .e-meta），第三列再提到 45%：
+   来源 90px 仍放得下「Hacker News」88px，标题列 198 → 179px。
+   负 margin + 等量 padding：hover 高亮向外多探 4px，而文字左右边缘与页眉页脚仍对齐——
+   不这么做的话，要么高亮贴着文字没有呼吸，要么整列内容被 padding 推进去 4px。 */
+.page-e a.e-item{text-decoration:none;color:inherit;border-radius:var(--r-sm);
+  margin-inline:calc(var(--sp-xs) * -1);padding-inline:var(--sp-xs);
+  transition:background var(--dur-state) var(--ease-standard)}
+.page-e a.e-item:hover{background:var(--surface)}
+.page-e a.e-item:focus-visible{outline:none;box-shadow:0 0 0 2px var(--accent)}
+.page-e .e-go{align-self:center;flex:none;color:var(--mute);display:inline-flex;
+  transition:color var(--dur-state) var(--ease-standard)}
+.page-e a.e-item:hover .e-go,
+.page-e a.e-item:focus-visible .e-go{color:var(--ink)}
+.page-e .e-item{flex:1;min-height:0;display:grid;grid-template-columns:18px minmax(0,1fr) minmax(0,45%);
   column-gap:var(--sp-sm);align-items:center}
 .page-e .e-no{font-family:var(--font-num);font-feature-settings:var(--num-features);
   font-variant-numeric:tabular-nums;font-size:var(--fs-min);color:var(--mute);text-align:right;line-height:1}
@@ -924,7 +945,6 @@ html[data-pure="1"] .pure-hint{position:fixed;left:50%;bottom:24px;transform:tra
   display:flex;align-items:baseline;justify-content:flex-end;gap:var(--sp-xs)}
 .page-e .e-src{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .page-e .e-time{flex:none;white-space:nowrap}
-.page-e .e-foot{flex:none;height:18px;font-size:var(--fs-min);color:var(--mute);line-height:18px}
 
 /* ==========================================================================
    attention 页 · 整屏只为这一件事
@@ -2450,6 +2470,9 @@ const ICON = {
   inbox:'<path d="M2.2 9.4h3.1l.9 1.9h3.6l.9-1.9h3.1"/><path d="M3.5 3.1h9l1.3 6.3v3.5H2.2V9.4z"/>',
   radio:'<circle cx="8" cy="8" r="1.6"/><path d="M4.8 11.2a4.5 4.5 0 0 1 0-6.4"/><path d="M11.2 4.8a4.5 4.5 0 0 1 0 6.4"/><path d="M2.4 2.4 13.6 13.6"/>',
   dot  :'<circle cx="8" cy="8" r="3.2"/>',
+  /* 外链：箭头出框。E 页每条新闻行尾的可点击信号，monoline、与全套同 1.6 描边 */
+  linkout:'<path d="M9.4 3.2h3.4v3.4"/><path d="M12.8 3.2 7.7 8.3"/>' +
+          '<path d="M11.9 9.5v2.7a1.4 1.4 0 0 1-1.4 1.4H3.8a1.4 1.4 0 0 1-1.4-1.4V5.5a1.4 1.4 0 0 1 1.4-1.4h2.7"/>',
 };
 const svg = (n, s = 14) =>
   `<svg viewBox="0 0 16 16" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="1.6" ` +
@@ -2809,7 +2832,6 @@ function renderPageD(){
   const weeks = USAGE.weeks || Math.round(shown.length / 7);
   el.pdHeat.innerHTML = `
     <div class="d-head"><span class="d-title">每日用量 · 近 ${weeks} 周</span>
-      <span class="d-hint">颜色越亮用得越多</span>
       <span class="d-date" id="dDate"></span></div>
     <div class="d-grid" style="--cell-w:${cellW}px;--cell-h:${cellH}px">
       <div class="d-days">${DAY_LABEL.map(x => `<span>${x}</span>`).join("")}</div>
@@ -2858,6 +2880,9 @@ function renderPageD(){
    规则：冒号分段，头段是平台通名就取尾段，否则头段本身就是名字（Gary Marcus /
    Hacker News）；括注一律去掉。**真正的剥离在数据层（新闻采集侧）做**，原型这里
    按剥离后的样子渲染，好让版面账算在最终形态上。 */
+/* 站内阅读页的兜底：fixture 的 url 目前全是 null，原型退回 AIHOT 站点根。
+   真实的 links.aihot 由数据层给，Electron 版还会校验 https 与域名（brief 第 8 条）。 */
+const AIHOT_HOME = "https://aihot.news/";
 const GENERIC_SRC = /^(公众号|微信|微博|知乎|播客|视频号|哔哩哔哩|B\s*站|newsletter|rss|blog|博客|论坛|网站)$/i;
 const srcName = s => {
   const t = String(s || "").replace(/[（(][^）)]*[）)]\s*$/, "").trim();
@@ -2895,14 +2920,24 @@ function renderPageE(){
         ? it.title + "（" + "超长标题压力测试".repeat(5) + "）" : it.title;
       const src = edge && i === 1
         ? srcName(it.source) + " · 一个长得离谱的来源名称用来撑破这一列" : srcName(it.source);
-      return `<div class="e-item">
+      /* REVISION 9 · 整行可点：原型用 a[target=_blank]，href 取条目的站内阅读页。
+         **Electron 版不是这样**：渲染层不持有 URL，点击只发条目 id，主进程从新闻缓存
+         取 links.aihot、校验 https 与域名后 shell.openExternal（见 brief 第 8 条）。
+         今天的 fixture 里 url 全是 null（AIHOT 选出的条目还没带链接），
+         所以原型退回站点根 —— 这是标注过的占位，不是编出来的条目链接。 */
+      const href = it.url || AIHOT_HOME;
+      return `<a class="e-item" href="${esc(href)}" target="_blank" rel="noopener noreferrer">
         <span class="e-no">${i + 1}</span>
         <span class="e-t">${esc(title)}</span>
         <span class="e-meta"><span class="e-src">${esc(src)}</span>
-          <span class="e-time" data-newswhen="${esc(it.at)}"></span></span>
-      </div>`;
-    }).join("")}</div>
-    <div class="e-foot">${esc(NEWS.attribution || "数据来源：AIHOT")}</div>`;
+          <span class="e-time" data-newswhen="${esc(it.at)}"></span>
+          <span class="e-go">${svg("linkout", 16)}</span></span>
+      </a>`;
+    }).join("")}</div>`;
+  /* REVISION 9 · 底部「数据来源：AIHOT」那一行删掉（个人非商业使用不要求可见署名，
+     页眉的「今日 AI · AIHOT」已经点明来源）。腾出的 18+8=26px 不留白：
+     .e-list 是 flex:1、每条 flex:1，高度自动摊回条目，下面那条按实测行高定行数的
+     规则也会跟着把标题从 2 行放到 3 行——空间回到内容上，而不是变成一条空带。 */
   /* 标题行数由实测的行高决定，而不是按画布高度一刀切：AIHOT 今天只给了 3 条，
      270 的画布上每条有 48px，放得下两行；满 5 条时每条只剩 27px，自动退回一行。 */
   const list = el.peNews.querySelector(".e-list");
@@ -3328,6 +3363,15 @@ document.addEventListener("keydown", e => {
   }
 });
 document.getElementById("btnPure").addEventListener("click", () => setPure(true));
+
+/* REVISION 9 · 点开一条新闻算手动交互：轮播按既有规则暂停 --manual-hold（120s），
+   指示点左边挂「‖」。不计未读、不打断——E 页从来不参与这两件事，点击不改变这一点。
+   委托挂在 peNews 容器上（renderPageE 每次重绘换的是它的内容，容器本身不变），
+   所以只挂一次；Enter 由 <a> 原生承担，click 事件同样会到这里。 */
+el.peNews.addEventListener("click", e => {
+  if (!(e.target instanceof Element) || !e.target.closest("a.e-item") || attnActive) return;
+  holdUntil = Date.now() + cssMs("--manual-hold");
+});
 
 /* ---------- 手动切换：键盘 / 指示点 / 边缘热区 ---------- */
 document.addEventListener("keydown", e => {

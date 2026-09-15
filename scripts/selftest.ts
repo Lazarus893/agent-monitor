@@ -28,6 +28,7 @@ import { scaleFor } from '../src/shared/scale.js'
 import { DEFAULT_CONFIG_FILE } from '../src/main/config.js'
 import { fileIn, load } from '../src/main/collectors/events/persist.js'
 import { closeConnectWindow, openConnectWindow } from '../src/main/connect.js'
+import { TitleIndex } from '../src/main/collectors/events/titles.js'
 import {
   deleteKeychain, keychainItemExists, keychainTarget, readKeychain
 } from '../src/main/collectors/quota/keychain.js'
@@ -345,6 +346,22 @@ export async function runSelftest(win: BrowserWindow, store?: Store): Promise<bo
     !!tiles3[2]?.label.startsWith('ZCode'), tiles3.map(t => t.label).join(' | '))
 
   const shown = (i: number): string => tiles3[i]?.num || `（${tiles3[i]?.msg || '空'}）`
+  /**
+   * 屏上那个数与**当场再采一次**的数比。
+   *
+   * 这两个采样天然隔着几秒，而额度是活的 —— 正在用 Codex 的时候它随时会 +1
+   * （2026-09-15 11:19 就撞上一次：瓦片 17 / 当场 18）。
+   * 所以取「采之前」与「采之后」两次屏上的读数，当场那个数命中其一即算一致：
+   * 它仍然钉住「瓦片画的是这个采集器的数」，但不会因为中间跳了一格就红。
+   */
+  const tileNum = (i: number): Promise<string> => js(win,
+    `(() => { const t = document.querySelectorAll('#paTiles .tile')[${i}]
+       return t ? ((t.querySelector('.a-nums')?.textContent || '').trim()
+         .replace(/[^0-9]/g, '')) : '' })()`)
+  /** 空读数按 shown() 那套记法呈现，日志里看得出「是空态还是数字」 */
+  const shownAt = (v: string): string => v || '（空）'
+  const before0 = await tileNum(0)
+  const before2 = await tileNum(2)
   const ac = new AbortController()
   const fresh: Partial<Record<AgentId, string>> = {}
   try {
@@ -356,10 +373,15 @@ export async function runSelftest(win: BrowserWindow, store?: Store): Promise<bo
     fresh.zcode = r.ok ? String(r.windows[0]?.usedPercent ?? '') : `（${r.code}）`
   } catch (err) { fresh.zcode = `（抛出 ${String(err)}）` }
 
-  check('Codex 瓦片 = codexbar 当场返回', shown(0) === fresh.codex,
-    `瓦片 ${shown(0)} · codexbar ${fresh.codex}`)
-  check('ZCode 瓦片 = 智谱 quota/limit 当场返回', shown(2) === fresh.zcode,
-    `瓦片 ${shown(2)} · 接口 ${fresh.zcode}`)
+  // 采完再读一次：中间这几秒里额度可能自己跳了一格
+  const after0 = await tileNum(0)
+  const after2 = await tileNum(2)
+  const hit = (a: string, b: string, want: string | undefined): boolean =>
+    want === a || want === b || want === shownAt(a) || want === shownAt(b)
+  check('Codex 瓦片 = codexbar 当场返回', hit(before0, after0, fresh.codex),
+    `瓦片 ${before0}${after0 === before0 ? '' : `→${after0}`} · codexbar ${fresh.codex}`)
+  check('ZCode 瓦片 = 智谱 quota/limit 当场返回', hit(before2, after2, fresh.zcode),
+    `瓦片 ${before2}${after2 === before2 ? '' : `→${after2}`} · 接口 ${fresh.zcode}`)
   // Claude 的主来源是 statusline tee 落的文件。tee 还没装时没有文件，OAuth 兜底今天
   // 在本机必 429 / 无 token —— 那时瓦片应当是这三种里的一种，而不是假数字。
   const claudeOk = !!tiles3[1]?.num ||
@@ -1061,7 +1083,6 @@ export async function runSelftest(win: BrowserWindow, store?: Store): Promise<bo
     type Field = { page: Page; name: string; sel: string }
     const REQUIRED: Field[] = [
       { page: 'a', name: 'A 倒计时', sel: '#paTiles .tile-foot .cd' },
-      { page: 'b', name: 'B 模型名', sel: '#pbBands [data-model]' },
       { page: 'c1', name: 'C1 行时间', sel: '#pc1Feed .row .rtime' },
       { page: 'e', name: 'E 条目时间', sel: '#peNews .e-item .e-time' }
     ]
@@ -1080,8 +1101,28 @@ export async function runSelftest(win: BrowserWindow, store?: Store): Promise<bo
       // 一个都没有 = 这一页此刻是空态（合法）；有而空 = 被裁没了（就是 E 页那个 bug）
       if (r.n > 0 && r.blank > 0) missing.push(`${f.name} 有 ${r.blank} 个是空的`)
     }
-    check('必填字段真的渲染出来了（A 倒计时 / B 模型名 / C1 时间 / E 时间）',
+    check('必填字段真的渲染出来了（A 倒计时 / C1 时间 / E 时间）',
       missing.length === 0, missing.length ? missing.join(' | ') : seen.join(' · '))
+
+    /* B 的模型名要**逐家**比，不能只数个数。
+       `AgentState.topModel` 在「这个 5h 窗内没有活动」时本来就是缺省的
+       （类型注释：没采到就留空，不要用「未知」占住那一行），所以「三家都得有」是错的口径，
+       一台闲了一夜的机器上会无故变红（2026-09-15 11:15 实测 codex=- zcode=-）。
+       但「数够个数」同样不行：屏上非空的那一个可能**不是**状态里有值的那一家。
+       唯一说得过去的判据是一一对应：状态里有，屏上就得有。 */
+    win.webContents.send(CH.command, { type: 'showPage', page: 'b', token: ++token })
+    await sleep(320)
+    const perAgent = await js<string[]>(win, `
+      [...document.querySelectorAll('#pbBands .tile')].map(t =>
+        (t.querySelector('[data-model]')?.textContent || '').trim())`)
+    const wantModels = store.get().agents.map(a => (a.topModel ?? '').trim())
+    const bad = wantModels
+      .map((w, i) => (w && !perAgent[i] ? `${store.get().agents[i]?.id}: 状态有「${w}」屏上空` : ''))
+      .filter(Boolean)
+    check('B 页模型名：状态里有的，屏上逐家都画出来了',
+      bad.length === 0,
+      bad.length ? bad.join(' | ')
+        : wantModels.map((w, i) => `${store.get().agents[i]?.id}=${w || '(本窗口无活动)'}`).join(' · '))
   }
 
   /* ==========================================================================
@@ -1150,6 +1191,141 @@ export async function runSelftest(win: BrowserWindow, store?: Store): Promise<bo
   // 量完把尺寸与动画开关都交还回去
   await js(win, "document.documentElement.style.removeProperty('--canvas-h')")
   await js(win, `document.documentElement.dataset.rm = ${JSON.stringify(rmBefore || '0')}`)
+
+  /* ==========================================================================
+     brief-m0-v2 §8 · 绿色热力图 / 去掉说明文字 / E 页可点。
+     量的是**计算样式与 DOM 角色**：色相写错、说明文字漏删、行还是 div，
+     这三件事结构性断言全看不出来。
+     ========================================================================== */
+  if (store) {
+    store.setLive()
+    await sleep(200)
+    await sendCommand(win, { type: 'showPage', page: 'd' })
+    await sleep(320)
+    const d = await js<{ hue: number[]; head: string; cells: number }>(win, `(() => {
+      /* 色阶是 oklch() 写的，而 getComputedStyle 会**原样**返回 oklch(...)，
+         不转成 rgb —— 拿正则去抠 rgb 只会抠到空。
+         画到 1×1 的 canvas 上读像素：不管作者写的是什么色彩语法，
+         读回来的都是实际画出去的那三个通道。 */
+      const cv = document.createElement('canvas')
+      cv.width = cv.height = 1
+      const ctx = cv.getContext('2d')
+      const hue = [1,2,3,4].map(l => {
+        const v = getComputedStyle(document.documentElement).getPropertyValue('--heat-' + l).trim()
+        if (!ctx || !v) return -1
+        ctx.clearRect(0, 0, 1, 1)
+        ctx.fillStyle = v
+        ctx.fillRect(0, 0, 1, 1)
+        const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data
+        // 绿相：g 是三通道里最大的，且明显高过 r 与 b
+        return (g > r + 8 && g > b + 8) ? 1 : 0
+      })
+      return {
+        hue,
+        head: (document.querySelector('#pdHeat .d-head')?.textContent || '').trim(),
+        cells: document.querySelectorAll('#pdHeat .cell[data-date]').length
+      }
+    })()`)
+    check('D 页：1–4 档都是绿色相，页眉只剩标题与日期（没有说明文字）',
+      d.hue.every(x => x === 1) && !/颜色越|越多|档/.test(d.head) && d.cells > 0,
+      `绿相 ${d.hue.join('')} · 页眉「${d.head}」 · ${d.cells} 格`)
+
+    await sendCommand(win, { type: 'showPage', page: 'e' })
+    await sleep(320)
+    const e = await js<{ tag: string; hasId: boolean; focusable: boolean; foot: number; go: number }>(win, `(() => {
+      const row = document.querySelector('#peNews .e-item')
+      if (!row) return { tag: '(没有行)', hasId: false, focusable: false, foot: -1, go: -1 }
+      row.focus()
+      return {
+        tag: row.tagName,
+        hasId: !!row.dataset.news,
+        focusable: document.activeElement === row,
+        foot: document.querySelectorAll('#peNews .e-foot').length,
+        go: document.querySelectorAll('#peNews .e-go svg').length
+      }
+    })()`)
+    check('E 页：行是可聚焦的 button 且只带 id、行尾有外链图标、底部署名已删',
+      e.tag === 'BUTTON' && e.hasId && e.focusable && e.foot === 0 && e.go > 0,
+      `<${e.tag.toLowerCase()}> data-news=${e.hasId} 可聚焦=${e.focusable} ` +
+      `署名行 ${e.foot} 个 · 外链图标 ${e.go} 个`)
+
+    /* 点一条：暂停轮播 120 s、页面不被切走、未读数不变。
+       **故意把 id 换成一个不存在的** —— 整条路照样走完（渲染层 → IPC → 主进程），
+       只是主进程在最后一道闸门上认定「这条没有站内阅读页」并拒绝，
+       于是自检不会真的弹出一个浏览器窗口。顺带把那条 WARN 路径也跑到了。 */
+    const unreadBefore = store.unread()
+    const clicked = await js<{ hold: boolean; page: string }>(win, `(() => {
+      const row = document.querySelector('#peNews .e-item')
+      row.dataset.news = 'selftest-no-such-news-id'
+      row.click()
+      return {
+        hold: !document.getElementById('holdmark').hidden,
+        page: document.documentElement.dataset.page || ''
+      }
+    })()`)
+    await sleep(200)
+    check('E 页：点一条 → 暂停轮播、不切页、不计未读（点开不打断）',
+      clicked.hold && clicked.page === 'e' && store.unread() === unreadBefore,
+      `‖=${clicked.hold} 停留在 ${clicked.page} 页 · 未读 ${unreadBefore}→${store.unread()}`)
+  }
+
+  /* ==========================================================================
+     会话标题：桌面端的名字后到时，C1 那一行要原地改名。
+     用**临时**索引目录与索引文件，绝不碰 ~/Library/Application Support/Claude
+     与 ~/.codex/session_index.jsonl。
+     ========================================================================== */
+  if (store) {
+    try {
+      const root = await mkdtemp(join(tmpdir(), 'selftest-titles-'))
+      const dir = join(root, 'claude-sessions')
+      const index = join(root, 'session_index.jsonl')
+      await mkdir(dir, { recursive: true })
+      await writeFile(index, '')
+
+      const sid = 'selftest-title-' + Date.now()
+      const evId = `codex:${sid}:1`
+      store.ingestEvent({
+        id: evId, agent: 'codex', kind: 'completed',
+        title: '首条提问当标题', at: new Date().toISOString(), sessionId: sid
+      }, false)   // isNew=false → 以已读进列表，改名之后要仍然是已读
+      await sendCommand(win, { type: 'showPage', page: 'c1' })
+      await sleep(260)
+      const before = await js<string>(win, `(() => {
+        const r = document.querySelector('.feed .row[data-id=' + JSON.stringify(${JSON.stringify(evId)}) + ']')
+        return r ? (r.querySelector('.rt')?.textContent || r.textContent || '').trim() : ''
+      })()`)
+
+      // 索引里写入桌面端那个名字，看 2 s 内 C1 那一行改没改
+      const ti = new TitleIndex({
+        title: h => { store.retitleSession(h.agent, h.sessionId, h.title) },
+        log: () => { /* selftest 里不吵 */ }
+      }, dir, index)
+      await ti.start()
+      await writeFile(index, JSON.stringify({ id: sid, thread_name: '桌面端里那个标题' }) + '\n')
+      const t0 = Date.now()
+      let after = ''
+      while (Date.now() - t0 < 2_000) {
+        await ti.tick()
+        await sleep(120)
+        after = await js<string>(win, `(() => {
+          const r = document.querySelector('.feed .row[data-id=' + JSON.stringify(${JSON.stringify(evId)}) + ']')
+          return r ? (r.querySelector('.rt')?.textContent || r.textContent || '').trim() : ''
+        })()`)
+        if (after.includes('桌面端里那个标题')) break
+      }
+      const ms = Date.now() - t0
+      ti.stop()
+      const still = store.get().events.find(e => e.id === evId)
+      check('索引写入标题后 2 s 内 C1 行改名，且 id / 已读状态不变（不算新事件）',
+        after.includes('桌面端里那个标题') && !!still && still.acked,
+        `${ms}ms：「${before.slice(0, 16)}」→「${after.slice(0, 16)}」 · id 不变=${!!still} 仍已读=${still?.acked}`)
+      store.setLive()
+      await sleep(150)
+    } catch (err) {
+      check('索引写入标题后 2 s 内 C1 行改名，且 id / 已读状态不变（不算新事件）', false, String(err))
+      store.setLive()
+    }
+  }
 
   /* ==========================================================================
      缺 five_hour 时两页都不许把 7d 的数当成 5h（2026-09-15 实机遇到的那次）。

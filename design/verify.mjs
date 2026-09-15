@@ -249,7 +249,7 @@ for (const cv of CANVASES) {
       //      flex / grid 容器：容器上的 ellipsis 不通电（R5-08 的老教训），
       //      所以对它们的要求直接是「不许溢出」——该收缩的是里面那个可变长的项。
       const CLIP_TEXT = ['.tile-foot .word', '.rtime', '.b-cd', '.e-src', '.rtitle',
-                         '.b-verdict', '.b-name span.t', '.d-hint', '.b-note'];
+                         '.b-verdict', '.b-name span.t', '.d-title', '.b-note'];
       const CLIP_BOX  = ['.tile-foot', '.b-head', '.d-head', '.d-nums', '.d-tip', '.e-meta'];
       const hardClip = [];
       if (live) {
@@ -259,6 +259,36 @@ for (const cv of CANVASES) {
         for (const sel of CLIP_BOX) for (const n of live.querySelectorAll(sel))
           if (n.scrollWidth > n.clientWidth + 1)
             hardClip.push(`${sel} 容器溢出 ${n.scrollWidth}>${n.clientWidth}（容器上的 ellipsis 不通电）`);
+      }
+
+      // 4j · REVISION 9 · 绿色阶必须真的解析出来，且五档互不相同。
+      //      oklch() 里引用一个不存在的变量会让整条声明静默作废（本轮已经吃过一次
+      //      内联 token 副本漂移的亏，那次 B 页轨道整条变透明而断言全绿）。
+      //      顺带守住「0 档不是绿的」：没有用量属于背景。
+      let heatLadder = [];
+      if (live && live.dataset.p === 'd' && live.querySelector('.cell')) {
+        const probe = document.createElement('span');
+        probe.style.cssText = 'position:absolute;width:1px;height:1px;opacity:0';
+        live.appendChild(probe);
+        for (let l = 0; l <= 4; l++) {
+          probe.style.backgroundColor = `var(--heat-${l})`;
+          heatLadder.push(getComputedStyle(probe).backgroundColor);
+        }
+        probe.remove();
+      }
+
+      // 4k · REVISION 9 · E 页每条新闻必须是可点的整行：<a> + https 链接 + 行尾 16px 外链图标。
+      //      「可点」是这一页新增的唯一功能，没有断言看着它就会在某次重构里悄悄退回 <div>。
+      const newsLink = [];
+      if (live && live.dataset.p === 'e') {
+        for (const it of live.querySelectorAll('.e-item')) {
+          if (it.tagName !== 'A') newsLink.push(`第 ${newsLink.length + 1} 条不是 <a>（${it.tagName}）`);
+          else if (!/^https:\/\//.test(it.getAttribute('href') || '')) newsLink.push(`href 不是 https: ${it.getAttribute('href')}`);
+          const go = it.querySelector('.e-go svg');
+          if (!go) newsLink.push('行尾缺外链图标');
+          // stage 是 scale(2*panelX, 2)，横纵倍率不同——量高度，纵向倍率恒为 2
+          else if (Math.round(go.getBoundingClientRect().height / 2) !== 16) newsLink.push('外链图标不是 16px');
+        }
       }
 
       // 4h · D-3 / D-4 · 页眉的三家数值是这块屏唯一的精确值出口（面板没有指针，
@@ -297,7 +327,7 @@ for (const cv of CANVASES) {
       }
       return {
         problems: out, accentEls, accent: accentEls.length, minFont, newsNoTime, fillWrong, heatCells,
-        hardClip, dNums, srcBad,
+        hardClip, dNums, srcBad, heatLadder, newsLink,
         offScale: [...new Set(offScale)], focusableHidden,
         headings: stage.querySelectorAll('h1,h2,h3,[role=heading]').length,
         statusEls: stage.querySelectorAll('[role="status"]').length,
@@ -323,6 +353,13 @@ for (const cv of CANVASES) {
         if (!r.dNums.includes(who)) r.problems.push(`D 页页眉缺 ${who}（三家里少一家: ${r.dNums}）`);
     // E-1 · 来源不许省略到只剩前缀
     for (const b of r.srcBad) if (!(s === 'edge' && b.startsWith('来源省略过半'))) r.problems.push(`E-SRC ${b}`);
+    // REVISION 9 · 绿色阶五档必须各自解析成功且互不相同
+    if (r.heatLadder.length === 5) {
+      if (new Set(r.heatLadder).size !== 5) r.problems.push(`HEAT 五档不是五个颜色: ${r.heatLadder.join(' / ')}`);
+      if (r.heatLadder.some(c => !c || c === 'rgba(0, 0, 0, 0)')) r.problems.push('HEAT 有档没解析出来（变量不存在？）');
+    }
+    // REVISION 9 · E 页整行可点
+    for (const b of r.newsLink) r.problems.push(`E-LINK ${b}`);
     // R5-01 · inert 断言
     if (r.focusableHidden > 0) r.problems.push(`INERT 非当前页仍有 ${r.focusableHidden} 个可聚焦元素`);
     // R5-05 · 例外清单断言：实测的 off-scale 集合必须等于声明的例外集合
@@ -549,6 +586,41 @@ const afterAck = await page.evaluate(() => ({
   live: document.getElementById('live').textContent }));
 console.log('  attention 行 Enter ack:', JSON.stringify(afterAck));
 if (afterAck.stillAttn || afterAck.page !== 'a') manual.push('attention 行不能用 Enter ack 解除');
+// REVISION 9 · E 页点开一条新闻：算手动交互（暂停 120s、挂「‖」），但不计未读、不打断。
+// 点击真的会导航（a[target=_blank]），所以先在捕获阶段挡掉默认行为——挡的是浏览器跳转，
+// 应用自己的冒泡监听照常跑，测的仍是「点了之后轮播暂不暂停」这件事。
+await page.evaluate(() => { document.documentElement.dataset.page === '' ; });
+await page.click('#segState button[data-s="populated"]');
+await page.click('#segPage button[data-p="e"]');
+await page.waitForTimeout(200);
+await page.evaluate(() => {
+  window.__navBlocked = 0;
+  document.addEventListener('click', e => {
+    const a = e.target instanceof Element && e.target.closest('a.e-item');
+    if (a) { window.__navBlocked++; e.preventDefault(); }
+  }, true);
+  document.getElementById('holdmark').hidden = true;      // 先清掉，确认是这一次点出来的
+  window.__unreadBefore = document.querySelectorAll('.row[data-unread="1"]').length;
+});
+await page.click('.page[data-on="1"] .e-item');
+await page.waitForTimeout(200);
+const newsClick = await page.evaluate(() => ({
+  blocked: window.__navBlocked,
+  hold: !document.getElementById('holdmark').hidden,
+  page: document.documentElement.dataset.page,
+  unreadDelta: document.querySelectorAll('.row[data-unread="1"]').length - window.__unreadBefore,
+  href: document.querySelector('.page[data-on="1"] .e-item').getAttribute('href'),
+  target: document.querySelector('.page[data-on="1"] .e-item').getAttribute('target'),
+  rel: document.querySelector('.page[data-on="1"] .e-item').getAttribute('rel'),
+}));
+console.log('  点开一条新闻:', JSON.stringify(newsClick));
+if (newsClick.blocked !== 1) manual.push('新闻行的点击没有落到 <a> 上');
+if (!newsClick.hold) manual.push('点开新闻后轮播没有暂停（没挂「‖」）');
+if (newsClick.page !== 'e') manual.push('点开新闻把页面切走了（不该打断）');
+if (newsClick.unreadDelta !== 0) manual.push(`点开新闻改变了未读数（${newsClick.unreadDelta}），E 页不该计未读`);
+if (newsClick.target !== '_blank' || !/noopener/.test(newsClick.rel || '')) manual.push('外链缺 target=_blank / rel=noopener');
+if (!/^https:\/\//.test(newsClick.href || '')) manual.push('外链不是 https');
+
 console.log('\n手动切换问题:', manual.length ? manual : 'none');
 
 // ---------------- 纯净模式 ----------------

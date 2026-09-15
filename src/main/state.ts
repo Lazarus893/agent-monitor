@@ -369,6 +369,21 @@ export class Store {
     return ev
   }
 
+  /**
+   * 桌面端的会话标题到了：把这个 session 已经在列表里的事件原地改名。
+   *
+   * 走 onFeedChange 让它落盘（下次启动回灌回来的就是好名字了），
+   * 但**不碰 generatedAt** —— 改个名不是「又采到了一轮」，
+   * 时间原点动了会让整屏的相对时间跟着跳一下。
+   */
+  retitleSession(agent: AgentId, sessionId: string, title: string): number {
+    const n = this.feed.retitle(agent, sessionId, title)
+    if (!n) return 0
+    this.onFeedChange?.(this.feed.list())
+    if (this.mode === 'live') this.emit(this.liveState())
+    return n
+  }
+
   /** collector 直接报的状态（目前只有 offline：事件源本身连不上） */
   setEventStatus(agent: AgentId, status: AgentStatus): void {
     if (this.eventStatus[agent] === status) return
