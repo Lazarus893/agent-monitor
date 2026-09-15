@@ -7,11 +7,16 @@
  * 而 Keychain 里的 accessToken 实测是空串。两种真实失败下面都有对应用例。
  */
 
-import { readFileSync } from 'node:fs'
-import { describe, expect, it, vi } from 'vitest'
 import {
-  ClaudeCollector, FILE_FRESH_MS, OAUTH_MIN_GAP_MS, isPlaceholder, parseAccessToken, parseRateLimits,
-  parseWrittenAt
+  copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync
+} from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { describe, expect, it, vi } from 'vitest'
+import type { RawSample } from '../../src/main/collectors/quota/claude.js'
+import {
+  ClaudeCollector, FILE_FRESH_MS, OAUTH_MIN_GAP_MS, SESSION_TTL_MS, collectSamples, isPlaceholder,
+  mergeSamples, newestSample, parseAccessToken, parseRateLimits, parseWrittenAt
 } from '../../src/main/collectors/quota/claude.js'
 import { summarize } from '../../src/main/collectors/quota/types.js'
 
@@ -297,5 +302,249 @@ describe('缺 five_hour', () => {
     })
     expect(w.map(x => x.label)).toEqual(['5h'])
     expect(w[0]!.usedPercent).toBe(3)
+  })
+})
+
+/* ==========================================================================
+   多会话合并（2026-09-15 实机 P1）。
+
+   用户同时开着几十个 Claude Code 会话，它们原来每秒轮流覆盖同一个
+   ~/.agent-monitor/claude-ratelimits.json —— 有的给 five_hour，有的不给，
+   采集每 15 s 读到哪份算哪份，面板上的 5h 于是时不时掉成占位 0%
+   （实测日志 744 次采集里 136 次 `5h=absent`）。
+   现在 tee 按 session_id 分文件，采集侧按键合并。
+
+   fixture 是那一刻 ~/.agent-monitor/claude-ratelimits/ 的真实内容，
+   见 tests/fixtures/ratelimits/README.md。
+   ========================================================================== */
+
+describe('mergeSamples / collectSamples', () => {
+  const FIX = new URL('../fixtures/ratelimits/', import.meta.url)
+  /** 样本里最晚的那次写入：2026-09-15T15:36:40+08:00 */
+  const NOW = Date.UTC(2026, 8, 15, 7, 36, 40)
+
+  const sample = (name: string): RawSample => {
+    const raw = load(`ratelimits/${name}.json`)
+    return { windows: parseRateLimits(raw), at: Date.parse(parseWrittenAt(raw)!) }
+  }
+  /** 那一刻真实在跑的四个会话 */
+  const four = (): RawSample[] => ['a', 'b', 'c', 'd'].map(n => sample(`session-${n}`))
+
+  /**
+   * 把若干 fixture 摆进一个临时的 claude-ratelimits/ 目录，返回 [目录, 老单文件路径]。
+   * `legacyFrom` 摆一份升级前遗留的单文件 —— 它该被忽略并清掉，不该参与合并。
+   */
+  const layout = (names: string[], legacyFrom?: string): [string, string] => {
+    const am = mkdtempSync(join(tmpdir(), 'agent-monitor-merge-'))
+    const dir = join(am, 'claude-ratelimits')
+    mkdirSync(dir)
+    for (const n of names) copyFileSync(new URL(`${n}.json`, FIX), join(dir, `${n}.json`))
+    const legacy = join(am, 'claude-ratelimits.json')
+    if (legacyFrom) copyFileSync(new URL(`${legacyFrom}.json`, FIX), legacy)
+    return [dir, legacy]
+  }
+  /** 把文件的 mtime 拨到 `ms` 毫秒之前（TTL 删除按 mtime 算） */
+  const age = (file: string, ms: number): void => {
+    const t = new Date(Date.now() - ms)
+    utimesSync(file, t, t)
+  }
+
+  it('fixture 就是那四份真实文件：两份有 5h，两份整个省掉了这个键', () => {
+    const keys = ['a', 'b', 'c', 'd'].map(n =>
+      Object.keys((load(`ratelimits/session-${n}.json`) as
+        { payload: { rate_limits: Record<string, unknown> } }).payload.rate_limits))
+    expect(keys).toEqual([
+      ['five_hour', 'seven_day'], ['seven_day'], ['seven_day'], ['five_hour', 'seven_day']
+    ])
+  })
+
+  /* 这一条是 P1 的正题。写得最晚的是 session-a（5h 5%），
+     按 writtenAt 取最新就会挑中它 —— 每个会话只知道**它自己最近一次 API 请求**
+     看到的额度，闲置会话每秒重写的是旧快照。 */
+  it('四个会话合并成 5h=12 / 7d=28：活着的窗口里取用量最大的，不是写得最晚的', () => {
+    expect(summarize(mergeSamples(four(), NOW))).toBe('5h=12% 7d=28%')
+  })
+
+  it('写入顺序怎么排都是同一个答案（合并不看谁先谁后）', () => {
+    const s = four()
+    const perms: RawSample[][] = [
+      [s[0]!, s[1]!, s[2]!, s[3]!], [s[3]!, s[2]!, s[1]!, s[0]!],
+      [s[1]!, s[3]!, s[0]!, s[2]!], [s[2]!, s[0]!, s[3]!, s[1]!]
+    ]
+    for (const p of perms) expect(summarize(mergeSamples(p, NOW))).toBe('5h=12% 7d=28%')
+  })
+
+  /* 跨过重置点：session-stale 的 5h 是**上一个窗口**的 97%（重置时刻已经过去），
+     而且它是写得最晚的一份。过期窗一律丢弃，所以它连参赛资格都没有。 */
+  it('过期窗被丢弃：上一个窗口的 97% 压不过当前窗口的 12%', () => {
+    expect(summarize(mergeSamples([...four(), sample('session-stale')], NOW)))
+      .toBe('5h=12% 7d=28%')
+  })
+
+  /* P1-1 的反例。当前 5h 窗还没有任何会话报过 five_hour 时，那个闲置会话的旧快照
+     没有竞争对手 —— 不丢弃过期窗的话它直接胜出，屏上长期「97% · 0m」且永不自愈
+     （tee 每秒重写，写入时刻永远新鲜，10 min 窗滤不掉它）。 */
+  it('过期窗是当前 5h 唯一来源 → 结果是占位，不是「97% · 0m」', () => {
+    const w = mergeSamples([sample('session-stale'), sample('session-b')], NOW)
+    expect(summarize(w)).toBe('5h=absent 7d=22%')
+    expect(isPlaceholder(w[0]!)).toBe(true)
+  })
+
+  it('重置时刻正好等于 now 也算过期（那一刻窗口已经翻篇）', () => {
+    const at = Date.parse('2026-09-15T09:00:00.000Z')   // fixture 里 5h 的重置时刻
+    expect(summarize(mergeSamples(four(), at))).toBe('5h=absent 7d=28%')
+  })
+
+  it('resetsAt 解析不出来的窗口不参与竞争（NaN 不许永久占位）', () => {
+    const bad: RawSample = { windows: [{ label: '5h', usedPercent: 99, resetsAt: '不是时刻' }], at: NOW }
+    expect(summarize(mergeSamples([bad, ...four()], NOW))).toBe('5h=12% 7d=28%')
+    expect(summarize(mergeSamples([...four(), bad], NOW))).toBe('5h=12% 7d=28%')
+  })
+
+  it('所有样本都没给出活着的 five_hour 时才落到占位', () => {
+    const w = mergeSamples([sample('session-b'), sample('session-c')], NOW)
+    expect(summarize(w)).toBe('5h=absent 7d=24%')
+    expect(isPlaceholder(w[0]!)).toBe(true)
+  })
+
+  it('一份样本都没有 → 一个窗口都不给（那一路该走 notice，不是 0%）', () => {
+    expect(mergeSamples([], NOW)).toEqual([])
+  })
+
+  it('扫目录：四份都在 → 合并结果与直接喂样本一致', async () => {
+    const [dir, legacy] = layout(['session-a', 'session-b', 'session-c', 'session-d'])
+    const got = await collectSamples(NOW, dir, legacy)
+    expect(got).toHaveLength(4)
+    expect(summarize(mergeSamples(got, NOW))).toBe('5h=12% 7d=28%')
+  })
+
+  /* P1-2：10 min 新鲜判定**不在这一层**。滤在这里的话，run() 里「旧数字带 stale
+     交出去」那条路在默认路径上就成了死代码，冷启动会把旧数字整个丢掉。 */
+  it('不新鲜（>10 min）的样本照样返回 —— 新鲜判定是 run() 的事', async () => {
+    const [dir, legacy] = layout(['session-a', 'session-b', 'session-c', 'session-d'])
+    const got = await collectSamples(NOW + FILE_FRESH_MS + 1000, dir, legacy)
+    expect(got).toHaveLength(4)
+  })
+
+  /* P2-6：升级前那份单文件现在没有任何东西写它，留着只会是个冻结的旧快照。 */
+  it('遗留的老单文件不参与合并，而且被顺手删掉', async () => {
+    const [dir, legacy] = layout(['session-b'], 'session-d')
+    expect(existsSync(legacy)).toBe(true)
+    const got = await collectSamples(NOW, dir, legacy)
+    expect(got).toHaveLength(1)                                   // 只有 session-b
+    expect(summarize(mergeSamples(got, NOW))).toBe('5h=absent 7d=22%')
+    expect(existsSync(legacy)).toBe(false)
+  })
+
+  it('老单文件本来就不存在时也不抛', async () => {
+    const [dir, legacy] = layout(['session-d'])
+    expect(await collectSamples(NOW, dir, legacy)).toHaveLength(1)
+  })
+
+  it('目录根本不存在（还没装 tee）→ 不抛，空表', async () => {
+    const am = mkdtempSync(join(tmpdir(), 'agent-monitor-merge-'))
+    expect(await collectSamples(NOW, join(am, 'claude-ratelimits'), join(am, 'nope.json'))).toEqual([])
+  })
+
+  /* P2-3：TTL 删除按 mtime 算、且在读之前 —— 坏 JSON 与 .tmp 残留也清得掉。
+     app 不跑的时候 tee 照写，不清就单向增长。 */
+  it('超过 24 h 没动过的文件被删掉，包括坏 JSON 与 .tmp 残留', async () => {
+    const [dir, legacy] = layout(['session-a', 'session-d'])
+    writeFileSync(join(dir, 'session-x.json.tmp.4242'), '{"writtenAt":')
+    writeFileSync(join(dir, 'session-broken.json'), 'not json at all')
+    for (const n of ['session-a.json', 'session-x.json.tmp.4242', 'session-broken.json']) {
+      age(join(dir, n), SESSION_TTL_MS + 60_000)
+    }
+    const got = await collectSamples(Date.now(), dir, legacy)
+    expect(existsSync(join(dir, 'session-a.json'))).toBe(false)
+    expect(existsSync(join(dir, 'session-x.json.tmp.4242'))).toBe(false)
+    expect(existsSync(join(dir, 'session-broken.json'))).toBe(false)
+    expect(existsSync(join(dir, 'session-d.json'))).toBe(true)     // 刚写的，留着
+    expect(got).toHaveLength(1)
+  })
+
+  it('24 h 内的文件一律不删，哪怕这一轮用不上它', async () => {
+    const [dir, legacy] = layout(['session-d'])
+    age(join(dir, 'session-d.json'), 23 * 3600_000)
+    await collectSamples(Date.now(), dir, legacy)
+    expect(existsSync(join(dir, 'session-d.json'))).toBe(true)
+  })
+
+  it('非 .json 与半写的 .tmp 文件一概不读', async () => {
+    const [dir, legacy] = layout(['session-d'])
+    writeFileSync(join(dir, 'session-x.json.tmp.4242'), '{"writtenAt":')
+    writeFileSync(join(dir, 'notes.txt'), 'hello')
+    expect(await collectSamples(NOW, dir, legacy)).toHaveLength(1)
+  })
+
+  it('坏 JSON 的那一份跳过，其余照常合并', async () => {
+    const [dir, legacy] = layout(['session-a', 'session-d'])
+    writeFileSync(join(dir, 'session-broken.json'), '{"writtenAt":"2026-09-15T15:36:41+08:00","pay')
+    const got = await collectSamples(NOW + 1000, dir, legacy)
+    expect(got).toHaveLength(2)
+    expect(summarize(mergeSamples(got, NOW))).toBe('5h=12% 7d=28%')
+  })
+
+  it('样本带出 model.display_name（topmodel 的兜底靠它）', async () => {
+    const [dir, legacy] = layout(['session-d'])
+    const got = await collectSamples(NOW, dir, legacy)
+    expect(got[0]!.model).toBe('Fable 5.1')
+    expect((await newestSample(NOW, dir))?.model).toBe('Fable 5.1')
+  })
+
+  it('newestSample 取写入时刻最新的那一份', async () => {
+    const [dir] = layout(['session-a', 'session-b', 'session-c', 'session-d'])
+    const s = await newestSample(NOW, dir)
+    expect(s?.at).toBe(Date.parse('2026-09-15T15:36:39+08:00'))   // session-a
+  })
+
+  it('ClaudeCollector 默认走合并，且 sampledAt 是最近一次有会话写入的时刻', async () => {
+    const [dir, legacy] = layout(['session-a', 'session-b', 'session-c', 'session-d'])
+    const fetchUsage = vi.fn()
+    const c = new ClaudeCollector({
+      now: () => NOW,
+      collectSamples: n => collectSamples(n, dir, legacy),
+      readToken: async () => 'tok',
+      fetchUsage
+    })
+    const r = await c.run(signal())
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(summarize(r.windows)).toBe('5h=12% 7d=28%')
+    expect(r.sampledAt).toBe('2026-09-15T07:36:39.000Z')   // session-a，写得最晚的那份
+    expect(fetchUsage).not.toHaveBeenCalled()              // 文件新鲜，一次网络都不发
+  })
+
+  /* P1-2 的反例：合盖过夜、早上开机（登录自启）就是这条路 —— 文件 20 min 前写的，
+     Keychain 没有可用令牌。旧数字必须连同它的写入时刻一起交出去（文件头纪律：stale），
+     而不是报「还没接入 statusline」把整块瓦片清成空态。 */
+  it('文件旧了（>10 min）且没有可用令牌：带回旧数字 + 写入时刻，标 stale 而不是空态', async () => {
+    const [dir, legacy] = layout(['session-a', 'session-b', 'session-c', 'session-d'])
+    const later = NOW + 20 * 60_000
+    const fetchUsage = vi.fn()
+    const c = new ClaudeCollector({
+      now: () => later,
+      collectSamples: n => collectSamples(n, dir, legacy),
+      readToken: async () => null,
+      fetchUsage
+    })
+    const r = await c.run(signal())
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.code).toBe('no_statusline')
+    expect(summarize(r.windows ?? [])).toBe('5h=12% 7d=28%')   // 数字没被丢掉
+    expect(r.sampledAt).toBe('2026-09-15T07:36:39.000Z')       // 停在文件的写入时刻
+    expect(fetchUsage).not.toHaveBeenCalled()                  // 没令牌就不算一次兜底调用
+  })
+
+  it('一份文件都没有时才是真的空态（no_statusline，不带 windows）', async () => {
+    const [dir, legacy] = layout([])
+    const c = new ClaudeCollector({
+      now: () => NOW,
+      collectSamples: n => collectSamples(n, dir, legacy),
+      readToken: async () => null,
+      fetchUsage: async () => ({ status: 200, body: {} })
+    })
+    expect(await c.run(signal())).toEqual({ ok: false, code: 'no_statusline' })
   })
 })

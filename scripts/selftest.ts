@@ -17,6 +17,7 @@ import { app, globalShortcut, Menu, screen } from 'electron'
 import { CH } from '../src/shared/ipc.js'
 import { SCENE_NAMES } from '../src/shared/types.js'
 import type { AgentId, AgentStatus, MonitorCommand, Page, SceneName } from '../src/shared/types.js'
+import type { QuotaResult } from '../src/main/collectors/quota/types.js'
 import { collectCodex } from '../src/main/collectors/quota/codex.js'
 import { createZcodeCollector } from '../src/main/collectors/quota/zcode.js'
 import type { Store } from '../src/main/state.js'
@@ -32,6 +33,7 @@ import { TitleIndex } from '../src/main/collectors/events/titles.js'
 import {
   deleteKeychain, keychainItemExists, keychainTarget, readKeychain
 } from '../src/main/collectors/quota/keychain.js'
+import { ClaudeCollector, collectSamples } from '../src/main/collectors/quota/claude.js'
 
 /** 自检发的指令：showPage 的 token 由 sendCommand 补，调用处不写。
  *  （Omit 作用在联合类型上会把分支压平，所以这里显式列出来。） */
@@ -1419,6 +1421,100 @@ export async function runSelftest(win: BrowserWindow, store?: Store): Promise<bo
     check('缺 five_hour：A 页倒计时「—」、5h 显 0%，B 页 7d 块照常渲染，7d 的数不串到 5h 槽',
       a.cd === '—' && a.num.startsWith('0') && b.pc === '0%' && b.sec === '7d 10%' && b.cd === '—',
       `A 数字「${a.num}」倒计时「${a.cd}」 · B 5h「${b.pc}」7d 块「${b.sec || '(缺)'}」倒计时「${b.cd}」`)
+  }
+
+  /* ==========================================================================
+     多会话合并，端到端（2026-09-15 实机 P1）。上面那一格喂的是合成额度，
+     这一格从**真的落盘文件**走起。用临时目录，绝不碰 ~/.agent-monitor/claude-ratelimits/。
+     ========================================================================== */
+  if (store) {
+    const sec = (ms: number): number => Math.floor((Date.now() + ms) / 1000)
+    /** 在临时目录里摆几份会话文件，跑一遍真实采集链路 */
+    const collectFrom = async (
+      files: [name: string, agoMs: number, rl: unknown][]
+    ): Promise<{ dir: string; result: QuotaResult }> => {
+      const am = await mkdtemp(join(tmpdir(), 'selftest-ratelimits-'))
+      const dir = join(am, 'claude-ratelimits')
+      await mkdir(dir, { recursive: true })
+      for (const [name, ago, rl] of files) {
+        await writeFile(join(dir, name), JSON.stringify({
+          writtenAt: new Date(Date.now() - ago).toISOString(),
+          payload: { rate_limits: rl, model: { display_name: 'Fable 5.1' } }
+        }))
+      }
+      const collector = new ClaudeCollector({
+        collectSamples: n => collectSamples(n, dir, join(am, 'claude-ratelimits.json')),
+        readToken: async () => null,   // 兜底这条路在自检里不许走网络
+        fetchUsage: async () => ({ status: 429, body: {} })
+      })
+      return { dir, result: await collector.run(new AbortController().signal) }
+    }
+    /** 推一份额度并读回 A 页那块瓦片。claude 的真实采集每 15 s 会顶掉它，读之前重推。 */
+    const readTile = async (r: QuotaResult): Promise<{ num: string; cd: string }> => {
+      const push = (): void => store.applyQuota('claude', r)
+      push()
+      await sendCommand(win, { type: 'showPage', page: 'a' })
+      push()
+      await sleep(260)
+      return js<{ num: string; cd: string }>(win, `(() => {
+        const t = document.querySelectorAll('#paTiles .tile')[1]
+        return { num: t?.querySelector('.a-nums')?.textContent?.trim() || '',
+                 cd: t?.querySelector('.cd')?.textContent?.trim() || '' }
+      })()`)
+    }
+
+    /* 忙的会话带 5h，闲的会话整个省掉 five_hour 且**写在后面**。
+       只取最新的话 5h 就掉成占位 0%；按键合并之后屏上必须是 12%。 */
+    try {
+      const { result } = await collectFrom([
+        ['sess-busy.json', 8_000, {
+          five_hour: { used_percentage: 12, resets_at: sec(2 * 3600_000) },
+          seven_day: { used_percentage: 28, resets_at: sec(90 * 3600_000) }
+        }],
+        ['sess-idle.json', 1_000, {
+          seven_day: { used_percentage: 24, resets_at: sec(90 * 3600_000) }
+        }]
+      ])
+      const w = result.ok ? result.windows[0] : undefined
+      const tile = await readTile(result)
+      check('两份会话文件（没 5h 的那份写在后面）合并后，A 页 5h 显 12% 而不是占位',
+        result.ok && w?.usedPercent === 12 && !!w?.resetsAt &&
+        tile.num.startsWith('12') && tile.cd !== '—',
+        `采集 ${result.ok ? `5h=${w?.usedPercent}%` : `（${result.code}）`} · ` +
+        `瓦片「${tile.num}」倒计时「${tile.cd}」`)
+      store.setLive()
+      await sleep(150)
+    } catch (err) {
+      check('两份会话文件（没 5h 的那份写在后面）合并后，A 页 5h 显 12% 而不是占位',
+        false, String(err))
+      store.setLive()
+    }
+
+    /* 复核 P1-1 的反例：当前 5h 窗没有任何会话报过 five_hour，唯一带 five_hour 的
+       是那个闲置会话每秒重写的**上一窗**快照（97%，重置时刻已经过去）。
+       不丢弃过期窗的话屏上会长期「97% · 0m」，而且永远不自愈。 */
+    try {
+      const { result } = await collectFrom([
+        ['sess-stuck.json', 1_000, {
+          five_hour: { used_percentage: 97, resets_at: sec(-3600_000) }   // 一小时前就翻篇了
+        }],
+        ['sess-live.json', 2_000, {
+          seven_day: { used_percentage: 28, resets_at: sec(90 * 3600_000) }
+        }]
+      ])
+      const w = result.ok ? result.windows[0] : undefined
+      const tile = await readTile(result)
+      check('过期窗是 5h 唯一来源：A 页显占位「—」，不是「97% · 0m」',
+        result.ok && w?.usedPercent === 0 && w?.resetsAt === '' &&
+        tile.num.startsWith('0') && tile.cd === '—',
+        `采集 ${result.ok ? `5h=${w?.usedPercent}% 重置「${w?.resetsAt}」` : `（${result.code}）`} · ` +
+        `瓦片「${tile.num}」倒计时「${tile.cd}」`)
+      store.setLive()
+      await sleep(150)
+    } catch (err) {
+      check('过期窗是 5h 唯一来源：A 页显占位「—」，不是「97% · 0m」', false, String(err))
+      store.setLive()
+    }
   }
 
   const guardAfter = await Promise.all(guarded.map(fingerprint))

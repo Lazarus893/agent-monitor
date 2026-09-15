@@ -17,11 +17,11 @@
  * Codex 与 ZCode 的 id 本身就是人读的（`gpt-6-astra`、`GLM-5.3-Flash`），原样用。
  */
 
-import { open, readdir, readFile, stat } from 'node:fs/promises'
+import { open, readdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { MODEL_DISPLAY } from './events/claude.js'
-import { STATUSLINE_FILE } from './quota/claude.js'
+import { STATUSLINE_DIR, newestSample } from './quota/claude.js'
 
 export const WINDOW_MS = 5 * 3600_000
 export const REFRESH_MS = 5 * 60_000
@@ -158,22 +158,18 @@ export async function claudeTopModel(
   return statuslineModel()
 }
 
-export async function statuslineModel(file = STATUSLINE_FILE): Promise<string | undefined> {
-  try {
-    const raw: unknown = JSON.parse(await readFile(file, 'utf8'))
-    if (typeof raw !== 'object' || raw === null) return undefined
-    const root = raw as Record<string, unknown>
-    const payload = (typeof root['payload'] === 'object' && root['payload'] !== null
-      ? root['payload'] : root) as Record<string, unknown>
-    const model = payload['model']
-    if (typeof model !== 'object' || model === null) return undefined
-    const name = (model as Record<string, unknown>)['display_name']
-    return typeof name === 'string' && name.trim()
-      ? (name.length <= NAME_MAX ? name : name.slice(0, NAME_MAX - 1) + '…')
-      : undefined
-  } catch {
-    return undefined
-  }
+/**
+ * statusline 兜底的模型名：会话目录里**写入时刻最新**那一份的 `model.display_name`。
+ *
+ * tee 从 2026-09-15 起按 session_id 分文件，不再写那个单文件（`claude.ts` 见到还会删它），
+ * 所以这里必须走目录 —— 还读单文件的话，新机器读到 ENOENT（B 页模型名消失），
+ * 老机器读到升级前冻结的那份旧快照（长期显示错的模型名）。
+ */
+export async function statuslineModel(dir = STATUSLINE_DIR): Promise<string | undefined> {
+  const s = await newestSample(Date.now(), dir)
+  const name = s?.model
+  if (!name) return undefined
+  return name.length <= NAME_MAX ? name : name.slice(0, NAME_MAX - 1) + '…'
 }
 
 /** Codex / ZCode 的 id 本身就是显示名，只做长度截断 */

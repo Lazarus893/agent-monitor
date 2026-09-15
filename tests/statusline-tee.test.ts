@@ -9,7 +9,9 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync
+} from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -35,6 +37,11 @@ if (!canRunCoralline) {
 
 const workdir = (): string => mkdtempSync(join(tmpdir(), 'agent-monitor-tee-'))
 
+/** 样本里的 session_id —— 新版 tee 按它分文件 */
+const SID = '00000000-0000-4000-8000-000000000000'
+/** 这份样本该落到哪儿：`<am>/claude-ratelimits/<sid>.json` */
+const sessionFile = (am: string): string => join(am, 'claude-ratelimits', `${SID}.json`)
+
 /** 关掉秒级时钟，其余沿用 coralline 默认 —— 两次运行之间唯一会变的就是它 */
 function fixedConf(dir: string): string {
   const conf = join(dir, 'coralline.conf')
@@ -59,7 +66,7 @@ describe('claude-statusline-tee.sh', () => {
     expect(out.stdout.toString()).toBe(SAMPLE.trimEnd())
     if (!jq) return   // 没有 jq 就只转发不落盘，下面的断言不适用
 
-    const raw = JSON.parse(readFileSync(join(dir, 'am', 'claude-ratelimits.json'), 'utf8')) as unknown
+    const raw = JSON.parse(readFileSync(sessionFile(join(dir, 'am')), 'utf8')) as unknown
     expect(parseWrittenAt(raw)).toBeTruthy()
     expect(parseRateLimits(raw)).toEqual([
       { label: '5h', usedPercent: 18, resetsAt: '2026-09-14T09:00:00.000Z' },
@@ -71,10 +78,13 @@ describe('claude-statusline-tee.sh', () => {
    * 复核 P1-③：这个文件每秒被重写一次。采集侧只要 rate_limits，
    * 而 statusline 的原始 JSON 里还有每个会话的工程路径、transcript 路径、session id。
    */
-  it.skipIf(!jq)('只落 rate_limits 与 model.display_name，不落 cwd / transcript_path / session_id', () => {
+  it.skipIf(!jq)('只落 rate_limits 与 model.display_name，不落 cwd / transcript_path / cost', () => {
     const dir = workdir()
     run([TEE], { AGENT_MONITOR_DIR: join(dir, 'am') })
-    const text = readFileSync(join(dir, 'am', 'claude-ratelimits.json'), 'utf8')
+    const text = readFileSync(sessionFile(join(dir, 'am')), 'utf8')
+    /* session_id 从「一个字都不落」变成「只出现在文件名里」（2026-09-15 多会话 P1）：
+       没有它就分不开写入者。它是个 uuid，不像 cwd 那样泄露工程结构，目录仍是 0700。
+       **文件内容里仍然一个字都没有。** */
     for (const leak of ['cwd', 'transcript_path', 'session_id', 'total_cost_usd', 'sample-project']) {
       expect(text).not.toContain(leak)
     }
@@ -89,7 +99,59 @@ describe('claude-statusline-tee.sh', () => {
     execFileSync('mkdir', ['-m', '755', am])
     run([TEE], { AGENT_MONITOR_DIR: am })
     expect(statSync(am).mode & 0o777).toBe(0o700)
-    expect(statSync(join(am, 'claude-ratelimits.json')).mode & 0o777).toBe(0o600)
+    expect(statSync(join(am, 'claude-ratelimits')).mode & 0o777).toBe(0o700)
+    expect(statSync(sessionFile(am)).mode & 0o777).toBe(0o600)
+  })
+
+  /* ====================================================================
+     按会话分文件（2026-09-15 实机 P1）。用户同时开着几十个 Claude Code 会话，
+     原来它们每秒轮流覆盖同一份文件 —— 有的给 five_hour，有的不给，
+     面板上的 5h 于是时不时掉成 0%。
+     ==================================================================== */
+
+  const runWith = (json: string, am: string): Run => {
+    try {
+      return { stdout: execFileSync('bash', [TEE], { input: json, env: { ...process.env, AGENT_MONITOR_DIR: am } }), status: 0 }
+    } catch (err) {
+      const e = err as { stdout?: Buffer; status?: number }
+      return { stdout: e.stdout ?? Buffer.alloc(0), status: e.status ?? 1 }
+    }
+  }
+  const payload = (sid: string | null, rl: unknown): string =>
+    JSON.stringify({ ...(sid ? { session_id: sid } : {}), rate_limits: rl })
+
+  it.skipIf(!jq)('两个会话各写各的，互不覆盖', () => {
+    const am = join(workdir(), 'am')
+    runWith(payload('sess-a', { five_hour: { used_percentage: 5, resets_at: 1789790400 } }), am)
+    runWith(payload('sess-b', { seven_day: { used_percentage: 22, resets_at: 1789790400 } }), am)
+    expect(readdirSync(join(am, 'claude-ratelimits')).sort()).toEqual(['sess-a.json', 'sess-b.json'])
+    expect(parseRateLimits(JSON.parse(readFileSync(join(am, 'claude-ratelimits', 'sess-a.json'), 'utf8'))))
+      .toEqual([{ label: '5h', usedPercent: 5, resetsAt: '2026-09-19T04:00:00.000Z' }])
+  })
+
+  /* 拿不到 session_id 也**不许**退回共写一份单文件 —— 几十个无 sid 会话共写一份，
+     正是这次要修的覆盖 bug。按写入进程（$PPID）分文件，老的单文件一个字都不写。 */
+  it.skipIf(!jq)('拿不到 session_id 时按写入进程分文件，不写老的单文件', () => {
+    const am = join(workdir(), 'am')
+    runWith(payload(null, { seven_day: { used_percentage: 22, resets_at: 1789790400 } }), am)
+    const names = readdirSync(join(am, 'claude-ratelimits'))
+    expect(names).toHaveLength(1)
+    expect(names[0]).toMatch(/^nosid-\d+\.json$/)
+    expect(existsSync(join(am, 'claude-ratelimits.json'))).toBe(false)
+  })
+
+  it.skipIf(!jq)('不合规的 session_id 一律当没拿到，绝不写出目录', () => {
+    const dir = workdir()
+    const am = join(dir, 'am')
+    for (const bad of ['../../pwned', 'a/b', '..', 'x'.repeat(65)]) {
+      runWith(payload(bad, { seven_day: { used_percentage: 1, resets_at: 1789790400 } }), am)
+    }
+    // `../../pwned` 相对 <dir>/am/claude-ratelimits 正好是 <dir>/pwned.json
+    expect(existsSync(join(dir, 'pwned.json'))).toBe(false)
+    expect(existsSync(join(am, 'pwned.json'))).toBe(false)
+    expect(existsSync(join(am, 'claude-ratelimits.json'))).toBe(false)
+    // 四次都落到同一份 nosid 文件里（同一个父进程），目录里就这一个
+    expect(readdirSync(join(am, 'claude-ratelimits'))).toHaveLength(1)
   })
 
   /**
@@ -135,7 +197,8 @@ describe('claude-statusline-tee.sh', () => {
     expect(after.stdout.equals(before.stdout)).toBe(true)
     expect(after.status).toBe(before.status)
     expect(before.stdout.length).toBeGreaterThan(0)
-    if (jq) expect(existsSync(join(dir, 'am', 'claude-ratelimits.json'))).toBe(true)
+    // 样本带 session_id，所以落在 claude-ratelimits/<sid>.json
+    if (jq) expect(existsSync(sessionFile(join(dir, 'am')))).toBe(true)
   })
 })
 

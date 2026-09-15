@@ -108,18 +108,48 @@ describe('扫描转录目录', () => {
   })
 })
 
+/* tee 从 2026-09-15 起按 session_id 分文件（P1-3）：兜底必须走目录。
+   还读老单文件的话，新机器读到 ENOENT（B 页模型名消失），
+   老机器读到升级前冻结的那份旧快照（长期显示错的模型名，且没有东西会删它）。 */
 describe('statusline 兜底', () => {
-  it('tee 落盘的包装形状里取 model.display_name', async () => {
-    const file = join(mkdtempSync(join(tmpdir(), 'sl-')), 'claude-ratelimits.json')
-    writeFileSync(file, JSON.stringify({
-      writtenAt: '2026-09-14T19:48:05+08:00',
-      payload: { rate_limits: {}, model: { display_name: 'Fable 5.1' } }
-    }))
-    expect(await statuslineModel(file)).toBe('Fable 5.1')
+  /** 一个临时的 claude-ratelimits/ 目录，`[sid, display_name, 写入时刻]` 各一份 */
+  const layout = (files: [string, string, string][]): string => {
+    const dir = join(mkdtempSync(join(tmpdir(), 'sl-')), 'claude-ratelimits')
+    mkdirSync(dir, { recursive: true })
+    for (const [sid, name, writtenAt] of files) {
+      writeFileSync(join(dir, `${sid}.json`), JSON.stringify({
+        writtenAt,
+        payload: {
+          rate_limits: { seven_day: { used_percentage: 3, resets_at: 1789790400 } },
+          model: { display_name: name }
+        }
+      }))
+    }
+    return dir
+  }
+
+  it('会话目录里取 writtenAt 最新那份的 model.display_name', async () => {
+    const dir = layout([
+      ['sess-old', 'Astra 3', '2026-09-14T19:48:05+08:00'],
+      ['sess-new', 'Fable 5.1', '2026-09-14T19:48:07+08:00']
+    ])
+    expect(await statuslineModel(dir)).toBe('Fable 5.1')
   })
 
-  it('没有文件 / 没有 model 时 undefined', async () => {
+  it('只有一份会话文件时就用它', async () => {
+    expect(await statuslineModel(layout([['solo', 'Fable 5.1', '2026-09-14T19:48:05+08:00']])))
+      .toBe('Fable 5.1')
+  })
+
+  it('目录不存在 / 里面没有 model 时 undefined', async () => {
     expect(await statuslineModel(join(tmpdir(), 'nope-' + Date.now()))).toBeUndefined()
+    const dir = join(mkdtempSync(join(tmpdir(), 'sl-')), 'claude-ratelimits')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'a.json'), JSON.stringify({
+      writtenAt: '2026-09-14T19:48:05+08:00',
+      payload: { rate_limits: { seven_day: { used_percentage: 3, resets_at: 1789790400 } } }
+    }))
+    expect(await statuslineModel(dir)).toBeUndefined()
   })
 })
 

@@ -138,8 +138,9 @@ function main() {
   console.log(`statusLine.command：\n  旧 ${current}\n  新 ${next}`)
   console.log(uninstall
     ? '已还原。'
-    : '已安装。下一次 statusline 刷新就会写 ~/.agent-monitor/claude-ratelimits.json' +
-      '（裁剪成 rate_limits + model.display_name，0600；需要 jq，没有 jq 则只转发不落盘）。')
+    : '已安装。下一次 statusline 刷新就会按会话写 ~/.agent-monitor/claude-ratelimits/<session_id>.json' +
+      '（裁剪成 rate_limits + model.display_name，目录 0700 / 文件 0600；' +
+      '多个会话各写各的，由采集侧合并；需要 jq，没有 jq 则只转发不落盘）。')
 }
 
 /* 被 import 时不执行 —— 与 install-claude-hooks.mjs 一致。

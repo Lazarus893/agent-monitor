@@ -15,7 +15,7 @@
 | 文件 | 来源 | 周期 | 输出 |
 |---|---|---|---|
 | `codex.ts` | `spawn("codexbar", ["usage", "--provider", "codex", "--json"])`，PATH 里找不到就试 `/opt/homebrew/bin/codexbar` | 60 s | `primary` → `5h`，`secondary` → `7d`；`usedPercent`、`resetsAt`；`loginMethod` 进 plan |
-| `claude.ts` | ① 主：读 `~/.agent-monitor/claude-ratelimits.json`（由下面的 statusline tee 写入，含写入时间）；② 备：Keychain `Claude Code-credentials` 里的 `claudeAiOauth.accessToken` 调 `GET https://api.anthropic.com/api/oauth/usage`，Header `Authorization: Bearer`、`anthropic-beta: oauth-2025-04-20` | ① 每 15 s 读文件；② 仅当文件不存在或超过 10 min 未更新时调用，最少间隔 5 min，429 后指数退避到 30 min | `five_hour` → `5h`，`seven_day` → `7d`；`used_percentage`、`resets_at`（可能是 epoch 秒或 ISO，两种都解析） |
+| `claude.ts` | ① 主：扫 `~/.agent-monitor/claude-ratelimits/*.json`（statusline tee 按 session_id 一个会话一份，含写入时间），5h / 7d 各取「还没过重置点里用量最大」的那份合并；② 备：Keychain `Claude Code-credentials` 里的 `claudeAiOauth.accessToken` 调 `GET https://api.anthropic.com/api/oauth/usage`，Header `Authorization: Bearer`、`anthropic-beta: oauth-2025-04-20` | ① 每 15 s 扫目录；② 仅当文件不存在或超过 10 min 未更新时调用，最少间隔 5 min，429 后指数退避到 30 min | `five_hour` → `5h`，`seven_day` → `7d`；`used_percentage`、`resets_at`（可能是 epoch 秒或 ISO，两种都解析） |
 | `zcode.ts` | Keychain：`security find-generic-password -s agent-monitor -a zcode-bigmodel -w`；`GET https://open.bigmodel.cn/api/monitor/usage/quota/limit`，Header `Authorization: <key>`（不加 Bearer） | 60 s | `TOKENS_LIMIT unit 3 number 5` → `5h`；`unit 6` → `7d`；`TIME_LIMIT` → `1mo`（current / total / unit「MCP 调用」）；`level` 进 plan |
 
 ### 统一行为
@@ -28,7 +28,7 @@
 
 ### statusline tee（Claude 主来源）
 
-- `scripts/claude-statusline-tee.sh`：从 stdin 读 JSON，原样写到 `~/.agent-monitor/claude-ratelimits.json`（加 `writtenAt`），再把原 JSON 通过管道交给原来的 statusline 命令，输出不变。写文件失败不影响原命令。
+- `scripts/claude-statusline-tee.sh`：从 stdin 读 JSON，裁成 `rate_limits` + `model.display_name` 后**按会话**写到 `~/.agent-monitor/claude-ratelimits/<session_id>.json`（加 `writtenAt`；拿不到 id 时是 `nosid-<ppid>.json`），再把原 JSON 通过管道交给原来的 statusline 命令，输出不变。几十个会话同时在跑时各写各的，绝不共写一份互相覆盖。写文件失败不影响原命令。
 - `scripts/install-claude-statusline.mjs`：读 `~/.claude/settings.json`，先备份到 `~/.claude/settings.json.bak-<时间戳>`，把 `statusLine.command` 改为 `bash <绝对路径>/claude-statusline-tee.sh -- <原命令>`；幂等（已安装则不重复包）；`--uninstall` 还原。**脚本只写不运行**，由 lead 决定何时安装。
 - 安装前后 statusline 的可见输出必须一字不差，写一个测试用 coralline 的样例 JSON 跑一遍对比。
 
