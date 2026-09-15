@@ -542,3 +542,39 @@ html[data-debug="1"] .harness{display:flex}
 .page-e button.e-item:focus-visible{outline:none;box-shadow:0 0 0 2px var(--accent)}
 .page-e button.e-item:hover .e-go,
 .page-e button.e-item:focus-visible .e-go{color:var(--ink)}
+
+/* ==========================================================================
+   F 页 · Midi 打字伴侣（design/brief-midi.md §4，原型 design/midi-prototype.html）
+
+   为什么这一段在 STAGE 段**外面**：STAGE 段是 design/variations.html 的逐字移植，
+   由 tests/stage-css-port.test.ts 钉死（差一个字节就红）。F 页不在那份原型里，
+   它的原型是另一份文件。写进 STAGE 段会让那条断言当场失效，而把 Midi 的样式
+   倒灌回 variations.html 等于让两份原型互相污染。与文件上一段（E 页的 button
+   覆盖）同一个处置：画布样式的真源不止一份时，各自留在自己那份里，差异写在注释上。
+   ========================================================================== */
+.page-f .fwrap{flex:1;display:flex;align-items:center;gap:var(--sp-md);min-height:0}
+/* 场景是整数倍放大的像素画：固定 CSS 尺寸 + pixelated，任何非整数缩放都会让
+   4px 的格子出现半格接缝。224×128 = 56×32 格 × 4px，在 403 画布上占 58% 宽，
+   480 画布上多出来的宽度全部落给右栏（场景不跟着变，倍率就不会掉出整数）。 */
+.page-f .f-scene{flex:none;width:224px;height:128px;image-rendering:pixelated}
+.page-f .f-side{flex:1;min-width:0;align-self:stretch;display:flex;flex-direction:column;
+  gap:var(--sp-sm);padding-top:var(--sp-sm)}
+.page-f .f-stats{display:flex;flex-direction:column;gap:var(--sp-sm);min-width:0}
+.page-f .f-label{font-size:var(--fs-min);color:var(--mute);line-height:1}
+.page-f .f-today{display:flex;flex-direction:column;gap:var(--sp-xs);min-width:0}
+.page-f .f-num{display:flex;align-items:baseline;gap:var(--sp-xxs);min-width:0}
+.page-f .f-num .num{font-size:var(--fs-num-f)}
+.page-f .f-num[data-wide="1"] .num{font-size:var(--fs-num-f-wide)}
+/* 「字」用 sans：它是个汉字量词，不是数字的一部分，等宽字形里的汉字比周围重一档 */
+.page-f .f-unit{flex:none;font-family:var(--font-sans);font-size:var(--fs-min);
+  color:var(--mute);line-height:1}
+.page-f .f-row{display:flex;align-items:baseline;justify-content:space-between;gap:var(--sp-sm);
+  border-top:1px solid var(--hairline);padding-top:var(--sp-xs);
+  font-size:var(--fs-min);color:var(--mute);line-height:1}
+.page-f .f-row b{font-family:var(--font-num);font-feature-settings:var(--num-features);
+  font-variant-numeric:tabular-nums;font-weight:var(--w-emph);color:var(--ink);white-space:nowrap}
+/* 文案压到底：今天 0 字时右栏少一块，文案不该跟着往上跑 —— 它是这一栏的落款。
+   简报写的是「一行」，这里留 3 行：untrusted 那句要写清去系统设置哪儿勾，
+   14px 下它在 151px 内宽里就是 3 行，截成一行等于把唯一的补救路径截掉。 */
+.page-f .f-state{margin:auto 0 0;font-size:var(--fs-min);color:var(--body);line-height:1.3;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}

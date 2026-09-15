@@ -19,3 +19,14 @@ export function assetDir(): string {
 export function scriptDir(): string {
   return app.isPackaged ? join(process.resourcesPath, 'scripts') : join(app.getAppPath(), 'scripts')
 }
+
+/**
+ * F 页心跳层的 AX 监听子进程。
+ * dev 下是 `scripts/build-ax-pulse.sh` 编出来的 `build/ax-pulse`（pnpm predev 会保证它在）；
+ * 打包后经 extraResources 落到 `Contents/Resources/ax-pulse`。
+ */
+export function helperPath(): string {
+  return app.isPackaged
+    ? join(process.resourcesPath, 'ax-pulse')
+    : join(app.getAppPath(), 'build', 'ax-pulse')
+}

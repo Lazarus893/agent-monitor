@@ -22,7 +22,7 @@ import { SCENE_NAMES } from '../src/shared/types.js'
 import type { Page, SceneName } from '../src/shared/types.js'
 import type { Store } from '../src/main/state.js'
 
-/** v2 六页 + attention。C2 为空时 showPage 仍然定得过去（它只是不在轮播里）。 */
+/** v2 六页 + F（Midi）+ attention。C2 为空时 showPage 仍然定得过去（它只是不在轮播里）。 */
 const PAGES: Array<{ page: Page; slug: string }> = [
   { page: 'a', slug: 'a' },
   { page: 'b', slug: 'b' },
@@ -30,6 +30,7 @@ const PAGES: Array<{ page: Page; slug: string }> = [
   { page: 'c2', slug: 'c2' },
   { page: 'd', slug: 'd' },
   { page: 'e', slug: 'e' },
+  { page: 'f', slug: 'f' },
   { page: 'attn', slug: 'attention' }
 ]
 

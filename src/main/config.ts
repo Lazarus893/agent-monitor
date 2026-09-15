@@ -54,6 +54,8 @@ export type Config = {
   alwaysOnTop?: boolean
   /** 托盘「登录时启动」。默认开（简报 §2）。 */
   openAtLogin?: boolean
+  /** 托盘「打字时切到 Midi」。默认开。 */
+  typingFollow?: boolean
   /**
    * 这个值是不是**用户自己调出来的**。
    *
@@ -109,6 +111,7 @@ export function readConfig(file = configFile()): Config {
     if (typeof o['muted'] === 'boolean') out.muted = o['muted']
     if (typeof o['alwaysOnTop'] === 'boolean') out.alwaysOnTop = o['alwaysOnTop']
     if (typeof o['openAtLogin'] === 'boolean') out.openAtLogin = o['openAtLogin']
+    if (typeof o['typingFollow'] === 'boolean') out.typingFollow = o['typingFollow']
     return out
   } catch {
     // 不存在 / 坏 JSON / 没权限 —— 三种都回落默认，配置不该是启动的必要条件
@@ -197,16 +200,19 @@ export type Prefs = {
   muted: boolean
   alwaysOnTop: boolean
   openAtLogin: boolean
+  /** 打字时把 F 页推到眼前（M5）。默认开 —— 猫的意义就是在你打字的时候陪着。 */
+  typingFollow: boolean
 }
 
-export const DEFAULT_PREFS: Prefs = { muted: false, alwaysOnTop: false, openAtLogin: true }
+export const DEFAULT_PREFS: Prefs = { muted: false, alwaysOnTop: false, openAtLogin: true, typingFollow: true }
 
 export function readPrefs(file = configFile()): Prefs {
   const cfg = readConfig(file)
   return {
     muted: cfg.muted ?? DEFAULT_PREFS.muted,
     alwaysOnTop: cfg.alwaysOnTop ?? DEFAULT_PREFS.alwaysOnTop,
-    openAtLogin: cfg.openAtLogin ?? DEFAULT_PREFS.openAtLogin
+    openAtLogin: cfg.openAtLogin ?? DEFAULT_PREFS.openAtLogin,
+    typingFollow: cfg.typingFollow ?? DEFAULT_PREFS.typingFollow
   }
 }
 

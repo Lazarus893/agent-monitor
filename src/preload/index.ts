@@ -6,7 +6,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { CH } from '../shared/ipc.js'
 import type {
-  AgentId, MonitorApi, MonitorCommand, MonitorState, NoticeCode, Page, SceneName
+  AgentId, MonitorApi, MonitorCommand, MonitorState, NoticeCode, Page, SceneName, TypingPulse
 } from '../shared/types.js'
 
 const api: MonitorApi = {
@@ -19,6 +19,11 @@ const api: MonitorApi = {
     const fn = (_e: unknown, cmd: MonitorCommand): void => cb(cmd)
     ipcRenderer.on(CH.command, fn)
     return () => { ipcRenderer.off(CH.command, fn) }
+  },
+  onPulse(cb) {
+    const fn = (_e: unknown, pulse: TypingPulse): void => cb(pulse)
+    ipcRenderer.on(CH.pulse, fn)
+    return () => { ipcRenderer.off(CH.pulse, fn) }
   },
   ack(id: string) {
     ipcRenderer.send(CH.ack, id)
@@ -62,6 +67,9 @@ if (import.meta.env.DEV) {
     },
     clearAttention() {
       ipcRenderer.send(CH.dev, { type: 'clearAttention' })
+    },
+    simulateTyping(chars: number) {
+      ipcRenderer.send(CH.dev, { type: 'simulateTyping', chars })
     }
   }
 }

@@ -11,7 +11,7 @@
 
 import type {
   AgentEvent, AgentId, AgentState, AgentStatus, CanvasSize, MonitorState, NewsData, Notice,
-  QuotaWindow, SceneName, UsageData
+  QuotaWindow, SceneName, TypingData, UsageData
 } from '../shared/types.js'
 import type { QuotaResult } from './collectors/quota/types.js'
 import { ERROR_TONE } from './collectors/quota/types.js'
@@ -100,6 +100,29 @@ const TOP_MODEL: Record<AgentId, string> = {
   codex: 'Astra', claude: 'Fable 5.1', zcode: 'GLM-5.3'
 }
 
+/**
+ * F 页的 fixtures（M5）。只有 populated 带它 —— 截图对账时 F 页得有内容；
+ * 其余场景不带，渲染层按 connecting 画（「Midi 正在醒来」）。
+ * 日期直接从 generatedAt 切：它本来就是带 +08:00 的本地 ISO，前 10 位就是本地日期。
+ *
+ * 导出是给 selftest 用的：那是 live 模式，不起心跳层子进程，
+ * 于是 F 页会一直缺 typing —— 自检要看的那一页就成了一句「Midi 正在醒来」。
+ *
+ * `lastInputAt` 取 generatedAt **减 10 分钟**，不取 generatedAt 本身：
+ * 截图对账要的是确定性。等于 generatedAt 的话，猫的状态跟着「截图这一刻离
+ * 时间原点多远」漂 —— 前 4 秒是 idle、4 秒后抬头、5 分钟后睡，同一份 fixture
+ * 每次拍出来可能不是同一帧。退到 10 分钟前就只有一个答案：≥5 分钟 = 睡着。
+ */
+export const fixtureTyping = (): TypingData => ({
+  status: 'ok',
+  date: QUOTA.generatedAt.slice(0, 10),
+  today: 2418,
+  yesterday: 1832,
+  streak: 12,
+  lastInputAt: new Date(new Date(QUOTA.generatedAt).getTime() - 10 * 60_000).toISOString(),
+  updatedAt: QUOTA.generatedAt
+})
+
 const agent = (
   id: AgentId,
   status: AgentState['status'],
@@ -127,7 +150,8 @@ const SCENES: Record<SceneName, () => SceneBody> = {
     generatedAt: QUOTA.generatedAt,
     loading: false,
     agents: okAgents(),
-    events: baseFeed()
+    events: baseFeed(),
+    typing: fixtureTyping()
   }),
   loading: () => ({
     generatedAt: QUOTA.generatedAt,
@@ -316,6 +340,8 @@ export class Store {
   private topModel: Partial<Record<AgentId, string>> = {}
   private usage: UsageData | undefined
   private news: NewsData | undefined
+  /** M5 · F 页的慢数据（心跳层账本派生）。脉冲走 CH.pulse，不进这里。 */
+  private typing: TypingData | undefined
   private panelX = PANEL_X_COMPRESSED
   /** 事件流变了就喊一声，由主进程接去落盘（Store 不碰文件系统） */
   private onFeedChange: ((events: AgentEvent[]) => void) | null = null
@@ -367,6 +393,7 @@ export class Store {
       events,
       ...(this.usage ? { usage: this.usage } : {}),
       ...(this.news ? { news: this.news } : {}),
+      ...(this.typing ? { typing: this.typing } : {}),
       ...over
     }
     // 事件区的空态：一条都没有时说「今天还没有完成的任务」，有了就撤掉
@@ -462,6 +489,12 @@ export class Store {
 
   setNews(news: NewsData): void {
     this.news = news
+    if (this.mode === 'live') this.emit(this.liveState())
+  }
+
+  /** M5 · F 页。节流由 collector 那边做（打字时每个字都会算出一份新的）。 */
+  setTyping(typing: TypingData): void {
+    this.typing = typing
     if (this.mode === 'live') this.emit(this.liveState())
   }
 

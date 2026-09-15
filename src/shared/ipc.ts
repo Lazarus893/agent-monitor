@@ -4,6 +4,8 @@ export const CH = {
   state: 'monitor:state',
   /** main → renderer：一次性指令（全局快捷键、截图定页） */
   command: 'monitor:command',
+  /** main → renderer：F 页心跳脉冲（TypingPulse）。高频、小、不进 MonitorState。 */
+  pulse: 'monitor:pulse',
   /** renderer → main */
   ack: 'monitor:ack',
   setPage: 'monitor:set-page',
@@ -22,3 +24,4 @@ export type DevMessage =
   | { type: 'simulateEvent' }
   | { type: 'simulateAttention' }
   | { type: 'clearAttention' }
+  | { type: 'simulateTyping'; chars: number }

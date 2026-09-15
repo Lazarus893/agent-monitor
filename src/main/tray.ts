@@ -39,6 +39,7 @@ export type TrayDeps = {
   prefs: () => Prefs
   /** 勾选后的落地。写配置由调用方做，这里只报事件。 */
   setMuted: (v: boolean) => void
+  setTypingFollow: (v: boolean) => void
   setAlwaysOnTop: (v: boolean) => void
   setOpenAtLogin: (v: boolean) => void
   /** 回到总览页（等价 ⌃⌥↑） */
@@ -116,6 +117,7 @@ export class TrayMenu {
       busy: this.busy
     }, {
       setMuted: v => { this.deps.setMuted(v); this.rebuild() },
+      setTypingFollow: v => { this.deps.setTypingFollow(v); this.rebuild() },
       setAlwaysOnTop: v => { this.deps.setAlwaysOnTop(v); this.rebuild() },
       setOpenAtLogin: v => { this.deps.setOpenAtLogin(v); this.rebuild() },
       home: () => this.deps.home(),
@@ -203,6 +205,7 @@ export type TrayActions = {
   setMuted: (v: boolean) => void
   setAlwaysOnTop: (v: boolean) => void
   setOpenAtLogin: (v: boolean) => void
+  setTypingFollow: (v: boolean) => void
   home: () => void
   connect: () => void
   install: (task: InstallTask) => void
@@ -235,6 +238,13 @@ export function trayTemplate(s: TrayState, a: TrayActions): Electron.MenuItemCon
       type: 'checkbox',
       checked: s.prefs.openAtLogin,
       click: item => a.setOpenAtLogin(item.checked)
+    },
+    {
+      // M5：连敲几下就把 Midi 那页推到眼前，停 30 s 恢复轮播。不想被它抢屏就关掉。
+      label: '打字时切到 Midi',
+      type: 'checkbox',
+      checked: s.prefs.typingFollow,
+      click: item => a.setTypingFollow(item.checked)
     },
     { label: '回到总览页', click: () => a.home() },
     { type: 'separator' },

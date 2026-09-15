@@ -20,16 +20,19 @@ import '../../design/tokens.css'
 import './app.css'
 
 import {
-  DEFAULT_CONFIG, ack as pagerAck, create, interruptAttention, interruptEvent,
+  DEFAULT_CONFIG, ack as pagerAck, create, interruptAttention, interruptEvent, interruptTyping,
   manual, manualPaused, orderFor, setAuto, setOrder, showPage as pagerShowPage, step, tick
 } from './pager.js'
 import type { PagerConfig, PagerState } from './pager.js'
 import type {
   AgentEvent, AgentId, AgentState, MonitorApi, MonitorState, NewsData, Notice, NoticeCode,
-  Page, QuotaWindow, SceneName, UsageData
+  Page, QuotaWindow, SceneName, TypingStatus, UsageData
 } from '../shared/types.js'
 import { scaleFor } from '../shared/scale.js'
 import { newsWhen } from './timefmt.js'
+import { flowStep, frameFor, isNight, MIDI_TIMING, milestoneHop, stateText } from './midi.js'
+import { CAT, CAT_PAL, CAT_PAW_ROW, KEYBOARD, LAMP } from './midi-sprites.js'
+import type { Frame } from './midi-sprites.js'
 
 declare global {
   interface Window { monitor: MonitorApi }
@@ -74,7 +77,8 @@ const FEED_TITLE: Partial<Record<SceneName, string>> = {
 
 /** 指示点的 aria 名。attn 不在轮播里，不需要名字。 */
 const PAGE_LABEL: Partial<Record<Page, string>> = {
-  a: '总览', b: '额度详情', c1: 'session', c2: '更早的 session', d: '每日用量', e: '今日 AI'
+  a: '总览', b: '额度详情', c1: 'session', c2: '更早的 session', d: '每日用量', e: '今日 AI',
+  f: 'Midi'
 }
 
 /** 热力图五档。0 档是「这一天没用」，顶档是 --charcoal（与额度填充同色）。 */
@@ -294,6 +298,7 @@ const el = {
   paTiles: $('paTiles'), pbBands: $('pbBands'),
   pc1Feed: $('pc1Feed'), pc2Feed: $('pc2Feed'),
   pdHeat: $('pdHeat'), peNews: $('peNews'), paAttn: $('paAttn'),
+  pfScene: $<HTMLCanvasElement>('pfScene'), pfStats: $('pfStats'), pfState: $('pfState'),
   feedTitle: $('feedTitle'), dots: $('dots'), live: $('live'), meter: $('meter'),
   unread: $('unread'), topLoading: $('topLoading'),
   panelxFlash: $('panelxFlash'), calib: $('calib')
@@ -329,6 +334,12 @@ let rm = window.matchMedia('(prefers-reduced-motion:reduce)').matches
  * 动画看 `rm`，声音只看这一位。
  */
 let muted = false
+/** 托盘「打字时切到 Midi」（M5），主进程经 `{type:'typingFollow'}` 推来，同 mute 的路 */
+let typingFollow = true
+/** 连敲判定：最近 BURST_WINDOW 内的脉冲时刻。碰一下键不该翻页，一句话开了头才算打字。 */
+const BURST_WINDOW = 2_000
+const BURST_COUNT = 3
+let burst: number[] = []
 let lastPage: Page | null = null
 let knownIds = new Set<string>()
 let firstState = true
@@ -352,7 +363,8 @@ function readConfig(): PagerConfig {
     dwellB: read('--dwell-b', DEFAULT_CONFIG.dwellB),
     dwellC: read('--dwell-c', DEFAULT_CONFIG.dwellC),
     dwellEvent: read('--dwell-event', DEFAULT_CONFIG.dwellEvent),
-    manualHold: read('--manual-hold', DEFAULT_CONFIG.manualHold)
+    manualHold: read('--manual-hold', DEFAULT_CONFIG.manualHold),
+    dwellTyping: read('--dwell-typing', DEFAULT_CONFIG.dwellTyping)
   }
 }
 
@@ -710,6 +722,311 @@ function renderPageE(): void {
   tickFeed()
 }
 
+/* ---------- 渲染：F 页 · Midi 打字伴侣 ---------- */
+
+/**
+ * 场景坐标（CSS px，像素倍率固定 4，所有物件都落在 4 的整数倍网格上）。
+ * 与原型 design/midi-prototype.html 的差别只有画幅：原型是一张独立样机，场景有 304×212；
+ * F 页在 403 画布上只有 387 可用，左场景 224、右栏 151。物件的相对位置一格没动 ——
+ * 砍掉的是原型右侧与上方的空气（DESK_Y 从 176 提到 92 —— 原型在灯上方留了 120px 的
+ * 空房间，那是样机里「屏幕的上半部分」，在 F 页只会让猫看起来沉在页脚；其余偏移量与原型逐字相同）。
+ * 上方仍留 36px：里程碑小跳（−8）与睡觉的 z（最高到 CAT_Y−6）都在这一格里。
+ */
+const MIDI_PX = 4
+const SCENE_W = 224
+const SCENE_H = 128
+const DESK_Y = 92
+const CAT_X = 96
+const CAT_Y = DESK_Y - 14 * MIDI_PX + 4
+const KB_X = 84
+const KB_Y = DESK_Y - 4 * MIDI_PX + 2
+const LAMP_X = 12
+const LAMP_Y = DESK_Y - 14 * MIDI_PX
+
+/**
+ * F 页的运行时状态。
+ *
+ * 两条数据进来：慢数据（MonitorState.typing，账本口径，5 s 一次）给 today / yesterday /
+ * streak / status；脉冲（onPulse，每个键一次）**只驱动动画**：爪子、亮键、心流灯。
+ * 屏上的数字只认账本：脉冲是正增量，而账本会在拼音上屏时把字母数扣回去（主进程
+ * PulseFolder），本地累加的话数字会先涨 10 再跌 7，每一句中文都抖一次。
+ * 5 秒一格地涨，比一个会往回跳的数诚实。里程碑小跳也按账本口径判。
+ *
+ * 时间全部用 now()（原点是主进程的 generatedAt），**不用 pulse.at**：
+ * 后者是真实 epoch，两把钟在 fixtures / 截图对账时对不上，猫会在冻住的时间里睡着。
+ */
+const midi = {
+  status: 'connecting' as TypingStatus,
+  /** 有没有收到过慢数据 —— 没有时右栏不画那两行 0，那不是「昨天 0 字」而是「还不知道」 */
+  has: false,
+  /** 慢数据的账本日期；跨日那一帧 today 归零不算里程碑 */
+  date: '',
+  today: 0,
+  yesterday: 0,
+  streak: 0,
+  /** 最近一次脉冲的时刻（now() 的钟）。这一程还没收到过就是 0。 */
+  lastInputAt: 0,
+  paw: 0,
+  flow: 0,
+  blinkAt: 0,
+  blinkUntil: 0,
+  hopUntil: 0,
+  litKey: -1,
+  litUntil: 0,
+  /** 上一帧画的时刻，心流灯的衰减按它算 */
+  lastAt: 0,
+  /** 右栏上一次画出来的字数，变了才重画那一小块 */
+  shownToday: -1
+}
+
+function paintMidiStats(): void {
+  midi.shownToday = midi.today
+  const num = String(midi.today)
+  const rows: string[] = []
+  const yesterday = `<div class="f-row"><span>昨天</span><b>${midi.yesterday} 字</b></div>`
+  const streak = `<div class="f-row"><span>连续</span><b>${midi.streak} 天</b></div>`
+  if (midi.today > 0) {
+    /* 五位数起降一档字号：右栏内宽 151px，52px 的等宽数字四位就用掉 121px。 */
+    rows.push(`<div class="f-today"><span class="f-label">今日</span>
+      <span class="f-num" data-wide="${num.length >= 5 ? 1 : 0}"><span class="num">${num}</span><span
+        class="f-unit">字</span></span></div>`, streak, yesterday)
+  } else if (midi.has) {
+    /* 简报 §4：今天 0 字时「今日」那一格不显示 0（0 会被读成评价），
+       把「昨天」提到最上面 —— 它是这一栏此刻唯一有内容的数。 */
+    rows.push(yesterday, streak)
+  }
+  el.pfStats.innerHTML = rows.join('')
+}
+
+function renderPageF(): void {
+  const t = state?.typing
+  midi.status = t?.status ?? 'connecting'
+  /* 这一帧没有 typing 就把右栏清空，而不是留着上一帧的数：
+     live 下它只在首轮之前缺省，但调试栏 / 自检切到不带 typing 的 fixtures 场景时，
+     留下来的会是另一份数据的「2418」——那不是「还不知道」，是张冠李戴。 */
+  midi.has = !!t
+  const prev = midi.today
+  midi.today = t?.today ?? 0
+  midi.yesterday = t?.yesterday ?? 0
+  midi.streak = t?.streak ?? 0
+  /* 慢数据里的「上一次打字是什么时候」。app 中途重启（或 F 页这一程还没收到过脉冲）时
+     没有它，猫会说「Midi 在等你」—— 而你两分钟前明明还在打，那句话是错的。
+     取 max 不直接赋：脉冲更新更准（慢数据节流 5 s），不能被一份 5 秒前的快照往回拨。
+     直接 Date.parse 就已经落在 now() 的坐标里，不需要换算：now() 的原点就是主进程的
+     generatedAt，而 lastInputAt 与 generatedAt 出自同一把钟（主进程的 Date.now()），
+     两者都是真实 epoch 毫秒，now() = generatedAt + 之后走过的时间，减法直接对得上。 */
+  const at = t?.lastInputAt ? Date.parse(t.lastInputAt) : Number.NaN
+  if (Number.isFinite(at)) midi.lastInputAt = Math.max(midi.lastInputAt, at)
+  // 里程碑按账本口径：这一份慢数据把今日数推过了 500 的倍数才跳
+  if (!rm && t && t.date === midi.date && milestoneHop(prev, midi.today)) midi.hopUntil = now() + 480
+  midi.date = t?.date ?? ''
+  paintMidiStats()
+  paintMidiState()
+}
+
+function paintMidiState(): void {
+  const t = now()
+  const txt = stateText({
+    now: t,
+    lastInputAt: midi.lastInputAt,
+    night: isNight(new Date(t).getHours()),
+    status: midi.status
+  })
+  if (el.pfState.textContent !== txt) el.pfState.textContent = txt
+}
+
+/**
+ * 画布调色板。猫的 5 色是分类色（写在 sprites 里），场景的 4 个字符走 tokens ——
+ * 桌子和灯是这块屏的一部分，得跟着整屏的中性阶走。
+ * 只取一次：tokens 是静态的，这屏没有主题切换。
+ */
+type MidiPalette = Record<string, string>
+let midiPal: MidiPalette | null = null
+function midiPalette(): MidiPalette {
+  if (midiPal) return midiPal
+  const cs = getComputedStyle(root)
+  const v = (n: string): string => cs.getPropertyValue(n).trim()
+  midiPal = {
+    ...CAT_PAL,
+    z: v('--mute'), L: v('--ink'), k: v('--hairline'), K: v('--canvas'),
+    /* 桌面：台面线用 --hairline（与瓦片边同一道线），桌前立面是 --surface。
+       影子比立面亮一档（--hairline）：灯在猫前面，影子是被挡住的**桌面**不是暗块。 */
+    desk: v('--surface'), shadow: v('--hairline'),
+    /* 灯光金 = --warn。这是它在这块屏上的第二个身份，简报 §4 明写只用于灯光。 */
+    gold: v('--warn')
+  }
+  return midiPal
+}
+
+function drawGrid(ctx: CanvasRenderingContext2D, grid: Frame, x: number, y: number,
+                  pal: MidiPalette, rowFrom = 0): void {
+  for (let r = rowFrom; r < grid.length; r++) {
+    const row = grid[r]
+    if (!row) continue
+    for (let c = 0; c < row.length; c++) {
+      const color = pal[row[c]!]
+      if (!color) continue
+      ctx.fillStyle = color
+      ctx.fillRect(x + c * MIDI_PX, y + r * MIDI_PX, MIDI_PX, MIDI_PX)
+    }
+  }
+}
+
+let sceneCtx: CanvasRenderingContext2D | null = null
+/** 上一帧真正画出来的那一组值。相同就不画（见 drawMidi 的脏键）。 */
+let drawnKey = ''
+
+/** 画一帧。t 是 now()，所有位移都是整数像素，只有灯光的透明度是平滑的。 */
+function drawMidi(t: number): void {
+  sceneCtx = sceneCtx ?? el.pfScene.getContext('2d')
+  const ctx = sceneCtx
+  if (!ctx) return
+  const pal = midiPalette()
+  const night = isNight(new Date(t).getHours())
+  const frame = frameFor({
+    now: t,
+    lastInputAt: midi.lastInputAt,
+    paw: midi.paw,
+    night,
+    // rm 下不眨眼（简报 §4），blinkUntil 直接当没有
+    blinkUntil: rm ? 0 : midi.blinkUntil,
+    status: midi.status
+  })
+  // 里程碑小跳：2 格上、2 格下，480 ms，切帧不补间；点头是 1px 的两帧循环
+  const hop = !rm && t < midi.hopUntil && (midi.hopUntil - t) / 480 > 0.4 ? -2 * MIDI_PX : 0
+  const gap = midi.lastInputAt ? t - midi.lastInputAt : 0
+  const bob = !rm && gap > MIDI_TIMING.TYPE_MS && gap < MIDI_TIMING.SLEEP_MS &&
+    Math.floor(t / 600) % 2 ? -1 : 0
+  const lit = t < midi.litUntil && midi.litKey >= 0 ? midi.litKey : -1
+  // 睡觉的 z：只在「打完字之后自己睡着」时冒，没权限 / 没连上那两种趴着不冒
+  const zPhase = frame === 'sleep' && midi.status === 'ok' && midi.lastInputAt
+    ? Math.floor(t / 700) % 3 : -1
+  // 影子：灯越亮影子越长，一格一格来（0–3 格）
+  const shadow = Math.round(midi.flow * 3) * MIDI_PX
+
+  /* 脏键：这一帧画出来的东西完全由下面这几个值决定，一个没变就没有像素会变，
+     rAF 照样每秒回来 60 次，但那 60 次里绝大多数是重画同一张图。
+     连续的只有灯光透明度，所以它按 ×100 取整分桶 —— 0.01 的透明度差在副屏的
+     余光里看不出来，而分桶让「停下不打字」的那几分钟里画面真的静止。
+     `prefers-reduced-motion` 下不跳、不点头、不眨眼，这一页于是几乎不再重绘。
+     键在 drawMidi 里算而不是在 midiFrame 里：frame / hop / bob 这些值本来就是
+     这里算的，挪到外面等于把同一段逻辑写两遍，那两份迟早会有一份忘了改。 */
+  const key = `${frame}|${night ? 1 : 0}|${Math.round(midi.flow * 100)}|${shadow}|${hop}|${bob}` +
+    `|${lit}|${midi.paw}|${zPhase}|${midi.has ? 1 : 0}|${midi.today}|${midi.yesterday}|${midi.streak}`
+  if (key === drawnKey) return
+  drawnKey = key
+
+  ctx.clearRect(0, 0, SCENE_W, SCENE_H)
+  const dim = night ? 0.55 : 1
+  ctx.globalAlpha = dim
+
+  /* 灯光：一个光锥 + 灯罩里那片亮。透明度跟着 flow 走 —— 副屏在余光里，
+     亮度变化比数字变化更容易被余光察觉。颜色用 globalAlpha 调而不是 rgba()，
+     这样色值可以原样是 tokens 里那串，不用在渲染层再解析一次 hex。 */
+  if (midi.flow > 0) {
+    ctx.fillStyle = pal.gold!
+    ctx.globalAlpha = dim * (0.04 + midi.flow * 0.22)
+    ctx.beginPath()
+    ctx.moveTo(LAMP_X + 8, LAMP_Y + 16)
+    ctx.lineTo(LAMP_X - 8, DESK_Y)
+    ctx.lineTo(LAMP_X + 120, DESK_Y)
+    ctx.closePath()
+    ctx.fill()
+    ctx.globalAlpha = dim * midi.flow * 0.9
+    ctx.fillRect(LAMP_X + 4, LAMP_Y + 4, 16, 8)
+    ctx.globalAlpha = dim
+  }
+  drawGrid(ctx, LAMP, LAMP_X, LAMP_Y, pal)
+
+  ctx.fillStyle = pal.k!
+  ctx.fillRect(0, DESK_Y, SCENE_W, 2)
+  ctx.fillStyle = pal.desk!
+  ctx.fillRect(0, DESK_Y + 2, SCENE_W, SCENE_H - DESK_Y - 2)
+
+  if (shadow) {
+    ctx.fillStyle = pal.shadow!
+    ctx.fillRect(CAT_X + 60, DESK_Y + 2, shadow + 8, 6)
+  }
+
+  const cy = CAT_Y + hop + bob
+  drawGrid(ctx, CAT[frame], CAT_X, cy, pal)
+
+  // 键盘画在猫前面（它坐在桌子后面），再把爪子那三行补画上去：爪子在键上，不在键后
+  drawGrid(ctx, KEYBOARD, KB_X, KB_Y, pal)
+  if (lit >= 0) {
+    ctx.fillStyle = pal.L!
+    ctx.fillRect(KB_X + (1 + lit * 2) * MIDI_PX, KB_Y + (midi.paw ? 3 : 1) * MIDI_PX,
+      MIDI_PX, MIDI_PX)
+  }
+  if (frame !== 'sleep') drawGrid(ctx, CAT[frame], CAT_X, cy, pal, CAT_PAW_ROW)
+
+  if (zPhase >= 0) {
+    ctx.fillStyle = pal.z!
+    for (let i = 0; i <= zPhase; i++) ctx.fillRect(CAT_X + 66 + i * 6, CAT_Y + 10 - i * 8, 3, 3)
+  }
+  ctx.globalAlpha = 1
+}
+
+/**
+ * 只在 F 页可见时跑的那个循环。切走就停 —— 别的六页上一帧都不该画，
+ * 副屏是一块常亮的屏，空转的 rAF 是白烧的电。
+ */
+let midiRaf = 0
+function midiFrame(): void {
+  midiRaf = requestAnimationFrame(midiFrame)
+  const t = now()
+  /* dt 不设上限：心流灯的衰减是单调的且有底（0.06），从别的页回来时一步补齐正好，
+     而不是让灯停在离开时的亮度上慢慢往下掉。
+     但下限是 0：now() 的原点会在主进程换一份 generatedAt 时整段往回挪（调试栏切场景），
+     那一帧 t 比上一帧小，负的 dt 会让衰减变成增亮。 */
+  const dt = Math.max(0, midi.lastAt ? (t - midi.lastAt) / 1000 : 0)
+  midi.lastAt = t
+  midi.flow = flowStep(midi.flow, { now: t, lastInputAt: midi.lastInputAt, dt })
+  if (!rm && t > midi.blinkAt) {
+    midi.blinkAt = t + 3_000 + Math.random() * 4_000
+    midi.blinkUntil = t + 110
+  }
+  if (midi.shownToday !== midi.today) paintMidiStats()
+  paintMidiState()
+  drawMidi(t)
+}
+
+function syncMidiLoop(): void {
+  const on = pg.page === 'f'
+  if (on && !midiRaf) midiRaf = requestAnimationFrame(midiFrame)
+  else if (!on && midiRaf) { cancelAnimationFrame(midiRaf); midiRaf = 0 }
+}
+
+/**
+ * 心跳脉冲。独立于 subscribe：打字时一秒十几次，走整份 MonitorState 会让七页
+ * 每个键都重渲染一遍。这里只动 midi 这一份可变量，画面由 rAF 那一头出。
+ */
+window.monitor.onPulse(p => {
+  const t = now()
+  midi.lastInputAt = t
+  midi.paw ^= 1
+  midi.flow = flowStep(midi.flow, { now: t, lastInputAt: t, dt: 0, delta: p.delta })
+  midi.litKey = Math.floor(Math.random() * 9)
+  midi.litUntil = t + 90
+
+  /* 打断 3 · 打字（M5）。连敲 3 下（2 s 内）才算开始打字；之后每个键都把 F 页的到期往后推。
+     用真实时钟做判定（pager 全程用 Date.now），now() 只是猫自己的钟。
+     切页走 applyPage，与新事件那条路同一个出口 —— 指示点、inert、setPage 都在那里。 */
+  if (!typingFollow) return
+  const real = Date.now()
+  burst = burst.filter(x => real - x <= BURST_WINDOW)
+  burst.push(real)
+  if (burst.length < BURST_COUNT && pg.page !== 'f') return
+  const next = interruptTyping(pg, real, cfg)
+  if (next === pg) return
+  const switched = next.page !== pg.page
+  pg = next
+  if (switched) {
+    applyPage()
+    el.live.textContent = '打字中，切到 Midi'
+  }
+})
+
 /* ---------- 渲染：attention 页 ---------- */
 
 const attnItem = (): AgentEvent | undefined =>
@@ -835,6 +1152,7 @@ function applyPage(): void {
   })
   renderDots(p)
   lastPage = p
+  syncMidiLoop()
   syncTopbar()
   syncSegPage()
   window.monitor.setPage(p)
@@ -971,7 +1289,8 @@ function onState(next: MonitorState): void {
     feedRows().forEach(r => { before.set(r.dataset.id!, r.getBoundingClientRect().top) })
   }
 
-  renderPageA(); renderPageB(); renderPageC(); renderPageD(); renderPageE(); renderPageAttn()
+  renderPageA(); renderPageB(); renderPageC(); renderPageD(); renderPageE(); renderPageF()
+  renderPageAttn()
   tickTiles(); tickFeed(); tickClocks()
   // C2 可能刚空掉 / 刚有行：轮播列表与指示点个数跟着变
   pg = setOrder(pg, orderFor(hasC2()), nowMs, cfg)
@@ -1151,6 +1470,10 @@ if (DEBUG) {
     if (attnItem()) window.monitor.dev?.clearAttention()
     else window.monitor.dev?.simulateAttention()
   })
+  /* F 页：走 dev IPC 注入 60 个字（与真实脉冲同一条路，含账本）。
+     主进程那边还没接上时这个按钮什么也不会发生 —— 渲染层不伪造脉冲，
+     伪造出来的猫会动而账本不动，那正是这块屏最不能出现的一种「好像在工作」。 */
+  $('btnType').addEventListener('click', () => window.monitor.dev?.simulateTyping(60))
 }
 
 /* ---------- 主进程指令 ---------- */
@@ -1171,6 +1494,9 @@ window.monitor.onCommand(cmd => {
     return
   } else if (cmd.type === 'mute') {
     muted = cmd.value
+    return
+  } else if (cmd.type === 'typingFollow') {
+    typingFollow = cmd.value
     return
   }
   applyPage()

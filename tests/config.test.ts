@@ -159,7 +159,7 @@ describe('托盘偏好', () => {
 
   it('默认值：不静音、不置顶、登录自启开', () => {
     expect(readPrefs(tmp())).toEqual(DEFAULT_PREFS)
-    expect(DEFAULT_PREFS).toEqual({ muted: false, alwaysOnTop: false, openAtLogin: true })
+    expect(DEFAULT_PREFS).toEqual({ muted: false, alwaysOnTop: false, openAtLogin: true, typingFollow: true })
   })
 
   it('写一个开关不会动到 panelX', () => {

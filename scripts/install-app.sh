@@ -45,9 +45,9 @@ fi
 ditto "$SRC" "$DEST"
 echo "已安装：$DEST"
 
-# 签名自检：ad-hoc 签名坏掉的话这里就会报，不要等到双击时才发现
+# 签名自检：签名坏掉的话这里就会报，不要等到双击时才发现（证书签或 ad-hoc 都走这一行）
 if codesign --verify --deep --strict "$DEST" 2>/dev/null; then
-  echo "签名校验通过（ad-hoc）。"
+  echo "签名校验通过。"
 else
   echo "警告：签名校验没过，首次启动可能被 Gatekeeper 拦下。" >&2
   echo "按 README「首次启动」一节处理：xattr -cr \"$DEST\"" >&2

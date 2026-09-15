@@ -30,6 +30,9 @@ extraResources:
       - install-claude-statusline.mjs
       - claude-hook.sh
       - claude-statusline-tee.sh
+  # F 页心跳层的 AX 监听子进程：主进程 spawn 它，必须是 asar 外的一个真实可执行文件
+  - from: build/ax-pulse
+    to: ax-pulse
   # 托盘图同理：nativeImage 从磁盘路径读，@2x 要和 1x 挨着放才会被自动选中
   - from: build/trayTemplate.png
     to: trayTemplate.png

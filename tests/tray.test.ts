@@ -19,6 +19,7 @@ const actions = (): TrayActions & { calls: string[] } => {
     setMuted: v => calls.push(`muted:${v}`),
     setAlwaysOnTop: v => calls.push(`top:${v}`),
     setOpenAtLogin: v => calls.push(`login:${v}`),
+    setTypingFollow: v => calls.push(`follow:${v}`),
     home: () => calls.push('home'),
     connect: () => calls.push('connect'),
     install: t => calls.push(`install:${t}`),
@@ -51,6 +52,7 @@ describe('菜单顺序', () => {
       '静音提示音',
       '总在最前',
       '登录时启动',
+      '打字时切到 Midi',
       '回到总览页',
       '—',
       '连接 ZCode…',
@@ -75,26 +77,26 @@ describe('菜单顺序', () => {
   })
 })
 
-describe('三个勾选项', () => {
+describe('四个勾选项', () => {
   const boxes = (s: TrayState) =>
     trayTemplate(s, actions()).filter(i => i.type === 'checkbox')
 
-  it('默认：不静音、不置顶、登录自启开', () => {
+  it('默认：不静音、不置顶、登录自启开、打字时切到 Midi 开', () => {
     expect(boxes(state()).map(i => [i.label, i.checked])).toEqual([
-      ['静音提示音', false], ['总在最前', false], ['登录时启动', true]
+      ['静音提示音', false], ['总在最前', false], ['登录时启动', true], ['打字时切到 Midi', true]
     ])
   })
 
   it('勾选状态跟着 prefs 走', () => {
-    const s = state({ prefs: { muted: true, alwaysOnTop: true, openAtLogin: false } })
-    expect(boxes(s).map(i => i.checked)).toEqual([true, true, false])
+    const s = state({ prefs: { muted: true, alwaysOnTop: true, openAtLogin: false, typingFollow: false } })
+    expect(boxes(s).map(i => i.checked)).toEqual([true, true, false, false])
   })
 
   it('点一下把新的勾选状态交出去', () => {
     const a = actions()
     const items = trayTemplate(state(), a).filter(i => i.type === 'checkbox')
     for (const it of items) it.click?.({ checked: true } as never, undefined as never, undefined as never)
-    expect(a.calls).toEqual(['muted:true', 'top:true', 'login:true'])
+    expect(a.calls).toEqual(['muted:true', 'top:true', 'login:true', 'follow:true'])
   })
 })
 
@@ -106,7 +108,7 @@ describe('ZCode 与 Claude 采集', () => {
 
   it('采集那一行随装没装变文案', () => {
     const label = (c: TrayState['claude']): string =>
-      String(trayTemplate(state({ claude: c }), actions())[8]!.label)
+      String(trayTemplate(state({ claude: c }), actions())[9]!.label)
     expect(label({ statusline: false, hooks: false })).toBe('Claude 采集：未接入')
     expect(label({ statusline: true, hooks: false })).toBe('Claude 采集：仅额度')
     expect(label({ statusline: false, hooks: true })).toBe('Claude 采集：仅事件')
@@ -115,7 +117,7 @@ describe('ZCode 与 Claude 采集', () => {
 
   it('子菜单三项：装过的显示「重装」，一个都没装时「全部卸载」灰掉', () => {
     const sub = (c: TrayState['claude']) =>
-      trayTemplate(state({ claude: c }), actions())[8]!.submenu as Electron.MenuItemConstructorOptions[]
+      trayTemplate(state({ claude: c }), actions())[9]!.submenu as Electron.MenuItemConstructorOptions[]
     const none = sub({ statusline: false, hooks: false })
     expect(none.map(i => (i.type === 'separator' ? '—' : String(i.label))))
       .toEqual(['安装 statusline 采集', '安装 hooks', '—', '全部卸载'])
@@ -130,7 +132,7 @@ describe('ZCode 与 Claude 采集', () => {
 
   it('脚本没随包出来 / 正在装 → 三项都灰掉，点不动', () => {
     for (const over of [{ canInstall: false }, { busy: true }]) {
-      const sub = trayTemplate(state({ claude: { statusline: true, hooks: true }, ...over }), actions())[8]!
+      const sub = trayTemplate(state({ claude: { statusline: true, hooks: true }, ...over }), actions())[9]!
         .submenu as Electron.MenuItemConstructorOptions[]
       expect(sub.filter(i => i.type !== 'separator').map(i => i.enabled)).toEqual([false, false, false])
     }
@@ -138,7 +140,7 @@ describe('ZCode 与 Claude 采集', () => {
 
   it('三项各自触发对应的任务', () => {
     const a = actions()
-    const sub = trayTemplate(state({ claude: { statusline: true, hooks: true } }), a)[8]!
+    const sub = trayTemplate(state({ claude: { statusline: true, hooks: true } }), a)[9]!
       .submenu as Electron.MenuItemConstructorOptions[]
     for (const it of sub) it.click?.({} as never, undefined as never, undefined as never)
     expect(a.calls).toEqual(['install:statusline', 'install:hooks', 'install:uninstall-all'])

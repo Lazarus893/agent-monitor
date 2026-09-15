@@ -12,7 +12,7 @@ import { app, ipcMain, Menu, shell } from 'electron'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { MonitorWindow } from './window.js'
-import { Store } from './state.js'
+import { Store, fixtureTyping } from './state.js'
 import { registerShortcuts, unregisterShortcuts } from './shortcuts.js'
 import { CH } from '../shared/ipc.js'
 import type { DevMessage } from '../shared/ipc.js'
@@ -21,6 +21,7 @@ import type { AgentId, MonitorCommand, MonitorState, NoticeCode, Page, SceneName
 import { setForcedError, startQuota } from './collectors/quota/index.js'
 import { startEvents } from './collectors/events/index.js'
 import { startV2 } from './collectors/v2.js'
+import { startTyping } from './collectors/typing/index.js'
 import { PanelXConfig, readPrefs, writePref } from './config.js'
 import { installCrashGuards, logDir, startLogging } from './log.js'
 import { TrayMenu } from './tray.js'
@@ -136,6 +137,7 @@ async function main(): Promise<void> {
     push(store.get())
     // 静音是个偏好、不在 state 里，所以每次加载完都补推一次（崩溃重载后也不会丢）
     send({ type: 'mute', value: prefs.muted })
+    send({ type: 'typingFollow', value: prefs.typingFollow })
   })
   const unsubscribe = store.subscribe(push)
 
@@ -173,6 +175,7 @@ async function main(): Promise<void> {
   // 采集器在窗口加载完之后才 start（见下），这里先留个引用给 dev IPC / 新闻链接用
   let quota: ReturnType<typeof startQuota> | null = null
   let v2: ReturnType<typeof startV2> | null = null
+  let typing: ReturnType<typeof startTyping> | null = null
 
   if (!app.isPackaged) {
     ipcMain.on(CH.dev, (e, msg: DevMessage) => {
@@ -199,6 +202,10 @@ async function main(): Promise<void> {
           break
         case 'clearAttention':
           store.clearAttention()
+          break
+        case 'simulateTyping':
+          // 走与真实脉冲同一条路：60 个字就是 60 条脉冲，一条一条发
+          if (typeof msg.chars === 'number') typing?.simulate(msg.chars)
           break
       }
     })
@@ -294,6 +301,12 @@ async function main(): Promise<void> {
       writePref('openAtLogin', v)
       applyOpenAtLogin(v)
     },
+    setTypingFollow: v => {
+      prefs = { ...prefs, typingFollow: v }
+      writePref('typingFollow', v)
+      send({ type: 'typingFollow', value: v })
+      console.log(`[tray] 打字时切到 Midi ${v ? '开' : '关'}`)
+    },
     home: () => send({ type: 'home' }),
     calibrate: () => send({ type: 'calibrate' }),
     resetPanelX: () => applyPanelX(panel.reset(canvas)),
@@ -341,6 +354,22 @@ async function main(): Promise<void> {
   const events = SHOOT ? null : startEvents(store, dataDir)
   v2 = SHOOT || !events ? null : startV2(store, dataDir, events, app.getVersion())
   app.on('will-quit', () => { v2?.stop(); events?.stop() })
+
+  /* M5 · F 页心跳层。截图与自检都不起真的子进程：
+     shoot 要的是 fixtures 那一帧（populated 自带 typing）；
+     selftest 是 **live 模式**，起了子进程只会在自检机上弹一次辅助功能授权框，
+     而它要验的是「F 页画得出来」不是「AX 权限拿没拿到」。所以这里给一份 fixture ——
+     不给的话 live 下 F 页永远缺 typing，自检看到的是一句「Midi 正在醒来」。
+     脉冲是高频小包，不走 store —— 直接一条一条送到面板那个 webContents。 */
+  if (SELFTEST) store.setTyping(fixtureTyping())
+  typing = SHOOT || SELFTEST ? null : startTyping(store, dataDir, {
+    dev: !app.isPackaged,
+    send: pulse => {
+      if (!rendererReady || mw.win.isDestroyed()) return
+      mw.win.webContents.send(CH.pulse, pulse)
+    }
+  })
+  app.on('will-quit', () => typing?.stop())
 
   // 工具脚本动态 import：截图与自检代码不该出现在生产 main bundle 里（复核 P2-5.3）
   if (SHOOT) {

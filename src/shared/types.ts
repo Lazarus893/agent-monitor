@@ -151,6 +151,44 @@ export type NewsData = {
   error?: NoticeCode
 }
 
+/* ==========================================================================
+   M5 · F 页「Midi 打字伴侣」的数据层。
+   两层数据（design/brief-midi.md）：心跳层是本机 AX 监听子进程吐出的**只有增量字数**的脉冲，
+   日记层（dsh-ime 对账）留给下一期。这里只有心跳层能给的东西。
+   ========================================================================== */
+
+/**
+ * 心跳层的连接状态。
+ *   connecting · 子进程刚起，还没报到；
+ *   ok         · 在收脉冲（不等于此刻有人在打字）；
+ *   untrusted  · 系统没给辅助功能权限 —— 屏上要写清去哪儿开；
+ *   offline    · 子进程没起来 / 退出了（退避重启中）。
+ */
+export type TypingStatus = 'connecting' | 'ok' | 'untrusted' | 'offline'
+
+/**
+ * F 页的慢数据：逐日账本派生出来的三个数 + 连接状态。
+ * 由主进程按秒级节流推送（打字时每 5 s 一次），**不是**每个键一次 ——
+ * 每个键那条路走 TypingPulse（独立频道），渲染层用它在两次推送之间本地累加。
+ */
+export type TypingData = {
+  status: TypingStatus
+  /** 账本口径的本地日期 YYYY-MM-DD */
+  date: string
+  /** 今天到此刻的字数（只算「像打字」的增量，粘贴不算） */
+  today: number
+  /** 昨天的字数；账本里没有昨天就是 0 */
+  yesterday: number
+  /** 连续有输入的天数，含今天；今天还是 0 时从昨天往回数 */
+  streak: number
+  /** 最近一次收到脉冲的时刻 ISO；这一程还没收到就缺省 */
+  lastInputAt?: string
+  updatedAt: string
+}
+
+/** 心跳层的一次脉冲：某一刻新增了 delta 个字。没有内容、没有 app 名 —— 渲染层不需要知道更多。 */
+export type TypingPulse = { at: number; delta: number }
+
 export type SceneName =
   | 'populated' | 'loading' | 'empty' | 'error' | 'edge' | 'attention' | 'running' | 'full'
 
@@ -191,6 +229,8 @@ export type MonitorState = {
   usage?: UsageData
   /** E 页：今日 AI 大事。还没采到第一轮时缺省。 */
   news?: NewsData
+  /** F 页：Midi 打字伴侣的慢数据。心跳层子进程还没报到时缺省（渲染层按 connecting 画）。 */
+  typing?: TypingData
 }
 
 /**
@@ -199,7 +239,7 @@ export type MonitorState = {
  * 这里先把名字定下来（IPC 与配置要用），渲染层的 ORDER 仍是 M1 那三页 ——
  * 六页版的移植要等 designer 交付 design/variations.html 的 v2。
  */
-export type Page = 'a' | 'b' | 'c' | 'c1' | 'c2' | 'd' | 'e' | 'attn'
+export type Page = 'a' | 'b' | 'c' | 'c1' | 'c2' | 'd' | 'e' | 'f' | 'attn'
 
 /** 主进程 → 渲染层的一次性指令（状态走 MonitorState，不走这里） */
 export type MonitorCommand =
@@ -219,6 +259,8 @@ export type MonitorCommand =
    * 主进程在 did-finish-load 时补推一次当前值，重载后不会丢。
    */
   | { type: 'mute'; value: boolean }
+  /** M5 · 托盘「打字时切到 Midi」。同 mute：偏好不进 state，主进程 did-finish-load 补推。 */
+  | { type: 'typingFollow'; value: boolean }
 
 export type DevApi = {
   /** 场景名 = 喂 fixtures；'live' = 切回真实采集 */
@@ -228,11 +270,18 @@ export type DevApi = {
   simulateEvent(): void
   simulateAttention(): void
   clearAttention(): void
+  /** F 页：往心跳层里注入 chars 个字（走与真实脉冲同一条路，含账本） */
+  simulateTyping(chars: number): void
 }
 
 export type MonitorApi = {
   subscribe(cb: (state: MonitorState) => void): () => void
   onCommand(cb: (cmd: MonitorCommand) => void): () => void
+  /**
+   * F 页的心跳脉冲。独立于 subscribe：打字时一秒十几次，走整份 MonitorState
+   * 会让六页每个键都重渲染一遍。渲染层拿它驱动猫的爪子、灯与本地计数。
+   */
+  onPulse(cb: (pulse: TypingPulse) => void): () => void
   ack(id: string): void
   setPage(page: Page): void
   /** 截图脚本用：渲染层画完一帧后回报，带回指令里的 token */

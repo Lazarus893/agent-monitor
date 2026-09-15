@@ -7,3 +7,5 @@ out/
 *.tsbuildinfo
 test-results/
 design/shots/selftest/
+# Swift 心跳层子进程的编译产物（build/ 下的图标是要提交的，所以只点名这一个）
+build/ax-pulse

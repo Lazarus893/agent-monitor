@@ -58,7 +58,7 @@ class SkipConnectCheck extends Error {}
  * 这里的只是自检过程的留档。
  */
 /** 轮播里的全部页（含 attn）。截图与逐格量尺都按它走，加页只改这一处。 */
-const ALL_PAGES: Page[] = ['a', 'b', 'c1', 'c2', 'd', 'e', 'attn']
+const ALL_PAGES: Page[] = ['a', 'b', 'c1', 'c2', 'd', 'e', 'f', 'attn']
 
 const shotDir = (sub: string): string => join(process.cwd(), 'design', 'shots', 'selftest', sub)
 
@@ -1191,8 +1191,8 @@ export async function runSelftest(win: BrowserWindow, store?: Store): Promise<bo
     store.setScene('running')        // running 场景只有 4 条 → C2 空
     await sleep(300)
     const withoutC2 = await pagesNow()
-    check('指示点随 C2 有无增减（最多 6 个，居中贴底）',
-      withC2.join(',') === 'a,b,c1,c2,d,e' && withoutC2.join(',') === 'a,b,c1,d,e',
+    check('指示点随 C2 有无增减（最多 7 个，居中贴底）',
+      withC2.join(',') === 'a,b,c1,c2,d,e,f' && withoutC2.join(',') === 'a,b,c1,d,e,f',
       `有 C2：${withC2.join('→')} · C2 空：${withoutC2.join('→')}`)
 
     store.setScene('populated')
@@ -1200,11 +1200,11 @@ export async function runSelftest(win: BrowserWindow, store?: Store): Promise<bo
     const seq: string[] = []
     win.webContents.send(CH.command, { type: 'showPage', page: 'a', token: ++token })
     await sleep(200)
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 7; i++) {
       seq.push(await page(win))
       await sendCommand(win, { type: 'step', dir: 1 })
     }
-    check('页序 A→B→C1→C2→D→E', seq.join('→') === 'a→b→c1→c2→d→e', seq.join('→'))
+    check('页序 A→B→C1→C2→D→E→F', seq.join('→') === 'a→b→c1→c2→d→e→f', seq.join('→'))
 
     const dotsBottom = await js<{ centred: boolean; gap: number }>(win, `(() => {
       const box = document.querySelector('.screen').getBoundingClientRect()

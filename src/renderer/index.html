@@ -29,6 +29,14 @@
       <section class="page page-c" data-p="c2"><h2 class="sr">更早的 session</h2><div class="feed" id="pc2Feed"></div></section>
       <section class="page page-d" data-p="d"><h2 class="sr">每日用量</h2><div class="dwrap" id="pdHeat"></div></section>
       <section class="page page-e" data-p="e"><h2 class="sr">今日 AI 大事</h2><div class="ewrap" id="peNews"></div></section>
+      <!-- F 页：左边是像素场景（canvas 固定 224×128 = 56×32 格 × 4px，倍率只能是整数），
+           右边三个数 + 一行文案。场景是纯装饰，它说的每件事文案里都有，所以对无障碍树隐藏。 -->
+      <section class="page page-f" data-p="f"><h2 class="sr">Midi 打字伴侣</h2>
+        <div class="fwrap">
+          <canvas class="f-scene" id="pfScene" width="224" height="128" aria-hidden="true"></canvas>
+          <div class="f-side"><div class="f-stats" id="pfStats"></div><p class="f-state" id="pfState"></p></div>
+        </div>
+      </section>
       <section class="page page-attn" data-p="attn"><h2 class="sr">需要你</h2><div id="paAttn"></div></section>
       <button type="button" class="edge" data-side="prev" aria-label="上一页"></button>
       <button type="button" class="edge" data-side="next" aria-label="下一页"></button>
@@ -57,6 +65,7 @@
       <button type="button" data-p="c2" aria-pressed="false">C2</button>
       <button type="button" data-p="d" aria-pressed="false">D</button>
       <button type="button" data-p="e" aria-pressed="false">E</button>
+      <button type="button" data-p="f" aria-pressed="false">F</button>
       <button type="button" data-p="attn" aria-pressed="false">attn</button>
     </div>
   </div>
@@ -79,6 +88,7 @@
   <div class="hgroup">
     <button type="button" class="hbtn" id="btnPush">模拟新事件</button>
     <button type="button" class="hbtn" id="btnAttn">模拟等待批准</button>
+    <button type="button" class="hbtn" id="btnType">模拟打字 60 字</button>
     <label class="hcheck"><input type="checkbox" id="chkRm"> reduced-motion</label>
   </div>
 </div>

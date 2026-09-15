@@ -1,0 +1,590 @@
+<meta charset="utf-8">
+<title>Midi打字伴侣</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root{
+    --bg:#f3f1ec; --bg-2:#e9e6df; --card:#fbfaf7; --line:#d6d2c8; --line-soft:#e4e0d7;
+    --ink:#1b1b1e; --body:#3d3c3a; --mute:#7a776f; --ash:#a8a49a;
+    --gold:#c9931f; --gold-soft:rgba(201,147,31,.14);
+    --ok:#3f9a63; --warn:#b98418; --cut:#b4514a;
+    --sans:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Noto Sans SC","Helvetica Neue",Arial,sans-serif;
+    --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+    --px:"Silkscreen","IBM Plex Mono",monospace;
+    color-scheme:light;
+  }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){
+      --bg:#0f1012; --bg-2:#141517; --card:#17181b; --line:#2a2c30; --line-soft:#212327;
+      --ink:#f1f0ec; --body:#c9c7c1; --mute:#8f8d86; --ash:#5d5c58;
+      --gold:#f2c14e; --gold-soft:rgba(242,193,78,.14);
+      --ok:#59d499; --warn:#ffc533; --cut:#ff6161;
+      color-scheme:dark;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0f1012; --bg-2:#141517; --card:#17181b; --line:#2a2c30; --line-soft:#212327;
+    --ink:#f1f0ec; --body:#c9c7c1; --mute:#8f8d86; --ash:#5d5c58;
+    --gold:#f2c14e; --gold-soft:rgba(242,193,78,.14);
+    --ok:#59d499; --warn:#ffc533; --cut:#ff6161;
+    color-scheme:dark;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--body);font-family:var(--sans);font-size:15px;line-height:1.7;
+       padding-inline:clamp(16px,4vw,48px);padding-block:40px 96px}
+  .wrap{max-width:1040px;margin:0 auto;display:flex;flex-direction:column;gap:56px}
+  h1,h2,h3{color:var(--ink);text-wrap:balance;margin:0;line-height:1.25}
+  h1{font-size:clamp(28px,4vw,40px);font-weight:600;letter-spacing:-.01em}
+  h2{font-size:22px;font-weight:600}
+  h3{font-size:16px;font-weight:600}
+  p{margin:0}
+  .eyebrow{font-family:var(--px);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--mute);margin-bottom:10px}
+  .lede{max-width:62ch;font-size:17px;color:var(--body)}
+  section{display:flex;flex-direction:column;gap:18px}
+  .prose{max-width:66ch;display:flex;flex-direction:column;gap:12px}
+  .prose li{margin:0}
+  ul{margin:0;padding-left:1.2em}
+  code{font-family:var(--mono);font-size:.9em;background:var(--bg-2);padding:1px 5px;border-radius:3px;color:var(--ink)}
+  strong{color:var(--ink);font-weight:600}
+  a{color:var(--ink)}
+
+  /* ── 副屏样机 ───────────────────────────────────────── */
+  .device-wrap{width:100%;display:flex;flex-direction:column;gap:14px}
+  .device-frame{position:relative;width:100%;overflow:hidden;border-radius:14px;background:#000;
+                border:1px solid var(--line)}
+  .device{position:absolute;left:0;top:0;width:480px;height:270px;transform-origin:0 0;
+          background:#07080a;color:#f4f4f6;font-family:"Inter",var(--sans);overflow:hidden;user-select:none}
+  .device *{box-sizing:border-box}
+  .d-top{position:absolute;right:16px;top:12px;font-family:var(--mono);font-size:12px;color:#9c9c9d;letter-spacing:.02em}
+  .d-top b{font-weight:400;color:#f4f4f6}
+  .d-scene{position:absolute;left:14px;top:32px;width:304px;height:212px}
+  .d-scene canvas{position:absolute;left:0;top:0;width:304px;height:212px;image-rendering:pixelated}
+  .d-side{position:absolute;left:334px;top:40px;width:130px;display:flex;flex-direction:column;gap:12px}
+  .d-label{font-size:12px;color:#9c9c9d;letter-spacing:.02em}
+  .d-num{font-family:var(--mono);font-size:44px;line-height:1.05;color:#f4f4f6;font-variant-numeric:tabular-nums;letter-spacing:-.03em;font-weight:500}
+  .d-num small{font-family:var(--sans);font-size:14px;color:#9c9c9d;margin-left:4px;letter-spacing:0;font-weight:400}
+  .d-row{display:flex;align-items:baseline;justify-content:space-between;border-top:1px solid #242728;padding-top:8px;font-size:12px;color:#9c9c9d}
+  .d-row b{font-family:var(--mono);font-weight:500;color:#cdcdcd;font-variant-numeric:tabular-nums}
+  .d-visitors{display:flex;gap:6px;align-items:center;min-height:18px}
+  .d-visitors canvas{width:32px;height:28px;image-rendering:pixelated}
+  .d-visitors .none{color:#6a6b6c}
+  .d-state{font-size:12px;color:#cdcdcd;min-height:18px}
+  .d-dots{position:absolute;left:0;right:0;bottom:12px;display:flex;justify-content:center;gap:16px}
+  .d-dots i{width:5px;height:5px;border-radius:50%;background:#434345}
+  .d-dots i.on{background:#f4f4f6}
+
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+  .controls textarea{flex:1 1 320px;min-height:64px;resize:vertical;border:1px solid var(--line);background:var(--card);color:var(--ink);
+                     border-radius:8px;padding:10px 12px;font:inherit;font-size:15px;line-height:1.5}
+  .controls textarea:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+  .btns{display:flex;flex-wrap:wrap;gap:8px}
+  button.b{font:inherit;font-size:13px;padding:7px 12px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}
+  button.b:hover{border-color:var(--mute)}
+  button.b[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+  .hint{font-size:13px;color:var(--mute)}
+
+  /* ── 桌宠图鉴 ───────────────────────────────────────── */
+  .pets{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px}
+  .pet{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:12px}
+  .pet-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+  .pet-head .tag{font-family:var(--px);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--mute)}
+  .frames{display:flex;gap:10px;flex-wrap:wrap;background:#07080a;border-radius:8px;padding:12px 10px;justify-content:space-around}
+  .frame{display:flex;flex-direction:column;align-items:center;gap:6px}
+  .frame canvas{width:64px;height:56px;image-rendering:pixelated}
+  .frame span{font-family:var(--px);font-size:9px;letter-spacing:.08em;color:#9c9c9d;text-transform:uppercase}
+  .pet dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:13.5px}
+  .pet dt{color:var(--mute);white-space:nowrap}
+  .pet dd{margin:0;color:var(--body)}
+  .swatches{display:flex;gap:6px;flex-wrap:wrap}
+  .sw{width:18px;height:18px;border-radius:4px;border:1px solid rgba(0,0,0,.15)}
+  label.chk{display:inline-flex;gap:8px;align-items:center;font-size:13px;color:var(--mute);cursor:pointer}
+
+  /* ── 表格与清单 ─────────────────────────────────────── */
+  .tbl{overflow-x:auto;border:1px solid var(--line);border-radius:10px}
+  table{border-collapse:collapse;width:100%;font-size:13.5px;min-width:640px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line-soft);vertical-align:top}
+  th{font-weight:600;color:var(--ink);background:var(--bg-2);font-size:12.5px;letter-spacing:.02em}
+  tr:last-child td{border-bottom:0}
+  td:first-child{color:var(--ink);font-weight:500;white-space:nowrap}
+
+  .loop{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;counter-reset:ring}
+  .ring{border:1px solid var(--line);border-radius:10px;padding:14px;background:var(--card);display:flex;flex-direction:column;gap:6px}
+  .ring::before{counter-increment:ring;content:"M" counter(ring);font-family:var(--px);font-size:11px;color:var(--gold);letter-spacing:.1em}
+  .ring b{color:var(--ink);font-weight:600}
+  .ring p{font-size:13.5px}
+  .ring .need{font-size:12.5px;color:var(--mute)}
+
+  .ideas{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
+  .idea{border:1px solid var(--line);border-radius:10px;padding:14px 16px;background:var(--card);display:flex;flex-direction:column;gap:6px}
+  .idea-h{display:flex;justify-content:space-between;align-items:center;gap:10px}
+  .idea-h b{color:var(--ink);font-weight:600}
+  .chip{font-family:var(--px);font-size:10px;letter-spacing:.1em;padding:3px 7px;border-radius:4px;white-space:nowrap}
+  .chip.m1{background:var(--gold-soft);color:var(--gold)}
+  .chip.m2{background:var(--bg-2);color:var(--body)}
+  .chip.cut{background:transparent;color:var(--cut);border:1px solid var(--cut)}
+  .idea p{font-size:13.5px}
+  .idea .why{color:var(--mute);font-size:12.5px}
+
+  .rules{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px 24px;font-size:14px}
+  .rules li{list-style:none;padding-left:14px;position:relative}
+  .rules li::before{content:"";position:absolute;left:0;top:.75em;width:6px;height:6px;background:var(--gold)}
+
+  .ask{border-left:3px solid var(--gold);padding:4px 0 4px 16px;display:flex;flex-direction:column;gap:8px;max-width:70ch}
+  .note{font-size:13px;color:var(--mute)}
+  @media (prefers-reduced-motion:reduce){ .device *{transition:none!important} }
+</style>
+
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">Agent Monitor · 副屏第七页 · 方案 v0</div>
+  <h1>Midi打字伴侣</h1>
+  <p class="lede" style="margin-top:14px">只有一只：坐在键盘后面的像素猫，你打字它就打字，你停下它看你，你走开它睡觉。它不评价你、不催你、不数落你，也永远不会因为你今天没打字而倒退。它只是在余光里陪你干活。</p>
+</header>
+
+<!-- ───────────────── 样机 ───────────────── -->
+<section>
+  <div class="eyebrow">480×270 画布 · 放大到 960×540</div>
+  <h2>先看它跑起来</h2>
+  <div class="device-wrap">
+    <div class="device-frame" id="frame">
+      <div class="device" id="device">
+        <div class="d-top"><b id="clock">16:33</b> · 1</div>
+        <div class="d-scene"><canvas id="scene" width="304" height="212"></canvas></div>
+        <div class="d-side">
+          <div>
+            <div class="d-label">今日</div>
+            <div class="d-num"><span id="count">2418</span><small>字</small></div>
+          </div>
+          <div class="d-row"><span>连续</span><b>12 天</b></div>
+          <div class="d-row"><span>心流</span><b id="flowTxt">灯灭</b></div>
+          <div class="d-row"><span>昨天</span><b>1 832 字</b></div>
+          <div class="d-state" id="state">Midi在等你</div>
+        </div>
+        <div class="d-dots"><i></i><i></i><i></i><i></i><i></i><i></i><i class="on"></i></div>
+      </div>
+    </div>
+    <div class="controls">
+      <textarea id="typebox" aria-label="在这里打字，样机里的猫会跟着动" placeholder="在这里打字，Midi会跟着敲键盘。停 4 秒它会抬头看你，停 12 秒它会睡着（真机是 5 分钟）。"></textarea>
+      <div class="btns" role="group" aria-label="模拟">
+        <button class="b" type="button" id="simBurst">模拟：连敲 60 字</button>
+        <button class="b" type="button" id="simNight">模拟：深夜模式</button>
+      </div>
+    </div>
+    <p class="hint">右侧数字是示例数据。每 100 字触发一次里程碑小跳（真机 500 字）；灯是「心流」，只随最近一分半的输入密度亮暗，停下来慢慢变暗但不归零。深夜模式是同一只猫：22 点后它眼睛变成一条缝，靠灯看你。</p>
+  </div>
+</section>
+
+<!-- ───────────────── 图鉴 ───────────────── -->
+<section>
+  <div class="eyebrow">一只桌宠 Midi · 16×14 格 · 5 色</div>
+  <h2>Midi的全部帧</h2>
+  <div class="prose"><p>只做一只，所有变化都发生在它身上：状态靠姿势区分，不靠换角色。画法沿用农场调研里的方向 B：<code>rect</code> 拼格、整数倍放大、同一物体只允许三阶明度、色相不做冷暖偏移。六帧之外再没有别的素材，帽子留到 M3。</p></div>
+  <label class="chk"><input type="checkbox" id="silhouette"> 灰度剪影检查（六帧在灰度下仍要能分辨，这是交付前必跑的一项）</label>
+  <div class="pets" id="pets"></div>
+</section>
+
+<!-- ───────────────── 数据 ───────────────── -->
+<section>
+  <div class="eyebrow">它靠什么动</div>
+  <h2>两层数据：心跳层与日记层</h2>
+  <div class="prose">
+    <p>农场 demo 走的是 dsh 派任务、模型读输入历史、报一份统计，一次 5 到 20 秒，还要用户先打开共享开关。这条路能回答「今天打了多少」，回答不了「此刻在不在打」。伴侣的灵魂是<strong>此刻</strong>，所以要拆成两层，各干各的。</p>
+  </div>
+  <div class="tbl"><table>
+    <thead><tr><th>层</th><th>信号</th><th>来源</th><th>延迟</th><th>看得到原文吗</th><th>驱动什么</th></tr></thead>
+    <tbody>
+      <tr><td>心跳层</td><td>最近一秒新增字数、当前 app、是否在打</td><td>三选一：① ContextIME v2 的 AX 监听，只取增量长度、文本当场丢弃；② 输入法本机新开一个只报计数的 <code>GET /v1/pulse</code>；③ CGEventTap 键击计数</td><td>&lt; 100 ms</td><td>不看，只数</td><td>镜像打字、心流灯、里程碑、换班伸懒腰</td></tr>
+      <tr><td>日记层</td><td>逐日统计：字数、app 分布、voice/typing、一句日记、访客判定</td><td>dsh-ime 现有链路，复用 <code>farm-keeper</code> 的任务形态与账本规则</td><td>5–20 s，一天几次</td><td>模型看，页面永远不显示</td><td>换装、夜猫子、一句日记、连续天数</td></tr>
+    </tbody>
+  </table></div>
+  <div class="prose">
+    <p><strong>推荐 ①。</strong>ContextIME 已经证明 AX 路线在 hardened app 里能用，一次辅助功能授权，不换输入法；伴侣只订阅「值变长了多少」，把文本留在监听进程里不出来。②最干净但要输入法侧排期；③要「输入监控」权限，而 Monitor 是 ad-hoc 签名，每次重打包签名标识就变，权限得重授一次，和钥匙串那个坑一样。</p>
+    <p>两层永远不混：心跳层的数字在真机上就是「今日」那个大数，日记层夜里对一次账，取 max 不回退。心跳层挂了，猫只是不动，不会显示 0；日记层未授权，右栏的「昨天」写「没读到」，不写 0。</p>
+  </div>
+</section>
+
+<!-- ───────────────── 核心循环 ───────────────── -->
+<section>
+  <div class="eyebrow">核心循环 · 五个环，每个环单独就是一个能跑的版本 · 全在一只猫身上</div>
+  <h2>玩法怎么搭</h2>
+  <div class="loop">
+    <div class="ring"><b>镜像</b><p>你敲一下，它敲一下，左右爪交替。停 600 ms 它收爪；停 4 秒抬头看你；停 5 分钟趴下睡。</p><p class="need">只要心跳层</p></div>
+    <div class="ring"><b>心流灯</b><p>桌上一盏灯，亮度等于最近 90 秒的输入密度。没有数字、没有进度条，停下来灯慢慢暗，但从不灭到底。</p><p class="need">只要心跳层</p></div>
+    <div class="ring"><b>里程碑</b><p>每 500 字一个小动作：跳一下、甩尾巴、把爪子举起来。累计 1 万字解锁一顶帽子，解锁了就不摘。</p><p class="need">心跳层 + 本地账本</p></div>
+    <div class="ring"><b>换装</b><p>同一只猫按你今天的样子换行头：Cursor 占大头戴护目镜，邮件多系领结，备忘录多叼铅笔，22 点后眼睛眯成一条缝。</p><p class="need">日记层（app、时段）</p></div>
+    <div class="ring"><b>一句日记</b><p>晚上对完账，猫在桌角写一行 40 字以内的话：「今天飞书说得多，备忘录里改了三遍」。只此一句，永不出现原文。</p><p class="need">日记层 + farm-keeper 式 skill</p></div>
+  </div>
+</section>
+
+<!-- ───────────────── 脑爆 ───────────────── -->
+<section>
+  <div class="eyebrow">脑爆 · 14 条 · 留 7 砍 7</div>
+  <h2>玩法清单与取舍</h2>
+  <div class="ideas">
+    <div class="idea"><div class="idea-h"><b>镜像打字</b><span class="chip m1">一期</span></div><p>零延迟是整个产品的手感来源。爪子交替、键帽亮一下，仅此而已。</p><p class="why">砍到只剩一个元素，剩的就是它。</p></div>
+    <div class="idea"><div class="idea-h"><b>心流灯</b><span class="chip m1">一期</span></div><p>把「专注」画成光而不是数。灯亮的时候猫的影子会拉长一格。</p><p class="why">副屏在余光里，亮度变化比数字变化更容易被余光察觉。</p></div>
+    <div class="idea"><div class="idea-h"><b>里程碑小动作</b><span class="chip m1">一期</span></div><p>每 500 字一个 480 ms 的动作，做完回到 idle。不弹字、不放礼花。</p><p class="why">Pikmin 那条：反馈要短、要有直接因果。</p></div>
+    <div class="idea"><div class="idea-h"><b>换班伸懒腰</b><span class="chip m1">一期</span></div><p>连续敲 90 分钟，猫自己伸个懒腰跳下桌，三分钟后回来。不是提醒你休息，是它累了。</p><p class="why">同样的事，主语换成猫，就从「被管」变成「被陪」。</p></div>
+    <div class="idea"><div class="idea-h"><b>访客图鉴</b><span class="chip cut">砍</span></div><p>Neko Atsume 式的第二、第三只：信鸽、蜗牛、夜枭按行为来访。</p><p class="why">只做一只。它们认的行为（聊天多、慢写、深夜）改成Midi自己的行头与姿势。</p></div>
+    <div class="idea"><div class="idea-h"><b>主战场换装</b><span class="chip m2">二期</span></div><p>当天字数最多的 app 决定猫戴什么：Cursor 是护目镜，邮件是领结，备忘录是铅笔；聊天多的日子桌角多一封信。</p><p class="why">只做一只之后，这是它表达「你今天是什么样的人」的唯一出口。app 字段一期契约就有。</p></div>
+    <div class="idea"><div class="idea-h"><b>语音耳朵</b><span class="chip m2">二期</span></div><p>语音输入时猫的耳朵转向你，旁边跳三格声波。一期契约没有 <code>input_mode</code>，退化为不做。</p><p class="why">和农场「语音=施肥」同一个退化口径。</p></div>
+    <div class="idea"><div class="idea-h"><b>agent 联动</b><span class="chip m2">二期</span></div><p>Claude 或 Codex 跑完，猫叼来一面身份色小旗放桌角；有人等你批准，猫转头指向那一页。</p><p class="why">这是它和 Monitor 其他六页的接缝，也是这块屏本来的任务。</p></div>
+    <div class="idea"><div class="idea-h"><b>打字天气</b><span class="chip cut">砍</span></div><p>今天字数对比 28 天均值定阴晴。</p><p class="why">农场已经有热力图，而且「阴天」不管怎么写都会被读成评价。</p></div>
+    <div class="idea"><div class="idea-h"><b>速度与排行</b><span class="chip cut">砍</span></div><p>WPM、今日最快、连击数字。</p><p class="why">数字焦虑，违反「不评价」；副屏一天看几百眼，一个红数字就能毁掉陪伴感。</p></div>
+    <div class="idea"><div class="idea-h"><b>喂食抓虫小游戏</b><span class="chip cut">砍</span></div><p>点屏幕投喂、抓跑过的虫。</p><p class="why">副屏没有输入，Monitor 的设定是没有按钮、配置全在托盘。</p></div>
+    <div class="idea"><div class="idea-h"><b>夜猫子</b><span class="chip m2">二期</span></div><p>22 点后Midi眼睛眯成一条缝，靠灯看你；过 0 点打一个哈欠。</p><p class="why">不弹「该睡了」，它困了你自己会懂。只要本机时钟，连日记层都不用。</p></div>
+    <div class="idea"><div class="idea-h"><b>劝睡</b><span class="chip cut">砍</span></div><p>深夜弹「该睡了」。</p><p class="why">改成上面的夜猫子：猫自己困，不替你做决定。</p></div>
+    <div class="idea"><div class="idea-h"><b>第二只宠物</b><span class="chip cut">砍</span></div><p>养到一定字数解锁新宠。</p><p class="why">「解锁」会把陪伴变成目标。一只猫养久了本身就是记录。</p></div>
+    <div class="idea"><div class="idea-h"><b>打字内容联动表情</b><span class="chip cut">砍</span></div><p>按你打的内容情绪换表情。</p><p class="why">红线：原文不出那次对话；心跳层只数不看，这条从根上不成立。</p></div>
+  </div>
+</section>
+
+<!-- ───────────────── 约束 ───────────────── -->
+<section>
+  <div class="eyebrow">副屏专属纪律</div>
+  <h2>这块屏和手机屏不一样</h2>
+  <ul class="rules">
+    <li><strong>余光设计。</strong>静止是默认态，动作只在有意义时发生；不做常驻粒子、不做呼吸光晕。农场调研里 CrossPet 的 idle 就够：两帧 Y 偏移，600 ms 切一次。</li>
+    <li><strong>不回退，不评价，不出现原文。</strong>三条从农场原样继承。今天 0 字时猫只是睡着，右侧显示「昨天 1,832 字」而不是 0。</li>
+    <li><strong>同屏 ≤ 8 色，强调色只用在灯光和里程碑两处。</strong>身份色、语义色沿用 Monitor 的 tokens，猫自己的米色是分类色。</li>
+    <li><strong>像素动效卡帧。</strong>位移一律 <code>steps(N)</code> 落回网格，只有颜色和透明度允许平滑；整数倍放大，禁非整数缩放。</li>
+    <li><strong>接进轮播的方式：</strong>第七页，dwell 与其他页一致；打字时不抢页，但顶栏时钟左边留一个 12 px 的猫头角标，六页上都能看见它在动。</li>
+    <li><strong>诚实态五种：</strong>心跳层没接（猫趴着，文案「还没连上输入法」）、日记层未授权、今天没数据、正在打、深夜。每种一张对账截图。</li>
+  </ul>
+</section>
+
+<!-- ───────────────── 分层 ───────────────── -->
+<section>
+  <div class="eyebrow">分层交付 · 每层都是能用的产品</div>
+  <h2>怎么做</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>层</th><th>交付</th><th>依赖</th><th>验收</th></tr></thead>
+    <tbody>
+      <tr><td>M0</td><td>第七页进轮播；Midi idle / 打字 / 看你 / 睡 四态；心流灯；今日字数。心跳层先用 AX 增量。</td><td>ContextIME 的 AX 监听抽成一个只吐计数的子进程，Monitor 用现有 collector 机制接</td><td>敲一下 100 ms 内爪子动；停 5 分钟睡；拔掉监听进程猫趴下不显示 0</td></tr>
+      <tr><td>M1</td><td>里程碑、换班伸懒腰、本地账本（逐日字数，取 max）、连续天数</td><td>M0</td><td>500 字一动；连续 90 分钟猫下桌；账本重启不丢</td></tr>
+      <tr><td>M2</td><td>日记层：复用 dsh-ime 链路与 farm-keeper 规则，主战场判定、一句日记、昨天对账</td><td>共享开关、dsh web 在跑</td><td>三种授权态各一张截图；日记 ≤ 40 字、无原文（过红线闸门）</td></tr>
+      <tr><td>M3</td><td>换装（三顶行头）、夜猫子、语音耳朵、agent 联动小旗、六页角标</td><td>M2；帽子素材</td><td>input_mode 缺失时耳朵不动；旗子颜色与 tokens 里三个身份色一致</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ───────────────── 需要你 ───────────────── -->
+<section>
+  <div class="eyebrow">需要你拍板的三件事</div>
+  <h2>下一步</h2>
+  <div class="ask">
+    <p><strong>1 · 心跳层走哪条。</strong>我推荐 ContextIME 的 AX 监听。如果你更想让输入法自己出一个 pulse 端点，我先按端点契约写 mock，真端点来了直接换。</p>
+    <p><strong>2 · 素材。</strong>Midi的六帧是我用像素网格直接画的，不需要外部图片就能进 M0。如果你想自己画或找人画，规格是：16×14 或 16×16 格、PNG 透明底、每帧一张、命名 <code>&lt;pet&gt;_&lt;state&gt;_&lt;n&gt;.png</code>、≤ 8 色、关掉抗锯齿。三顶行头是 M3 才用到，可以晚点给；你要是想换一只别的动物，给我一张 16×14 的 idle 帧我照着补其余五帧。</p>
+    <p><strong>3 · 猫的名字与样子。</strong>已定：Midi，照用户家的美短银虎斑「壮汉昕晨」画：中银灰底、近黑虎斑加腿环胸带、白嘴白胸白袜、黄绿眼睛（用户 2026-09-15 选定 A 版并要求整体压深一档）。心跳层已定走 ContextIME 的 AX 路线，M0 正在 Monitor 仓库里实现（design/brief-midi.md）。</p>
+  </div>
+  <p class="note">页面里所有数字都是示例；真机的 500 字里程碑、5 分钟入睡、90 分钟换班在这里分别缩成 100 字、12 秒、不模拟。</p>
+</section>
+
+</div>
+
+<script>
+(() => {
+  // ───────────────────────── 像素资产 ─────────────────────────
+  // 每只 16×14 格。字符 → 颜色；'.' 透明。同一物体三阶明度：base / 暗 / 亮。
+  const PAL = {
+    // Midi（猫）
+    o:'#b5b7bb', d:'#25262b', h:'#eeeeeb', e:'#a3c257', p:'#c07b7b',
+    // 信鸽
+    g:'#8fa3bf', G:'#5c6e8a', y:'#f2c14e', w:'#f4f4f6', r:'#ff6161',
+    // 蜗牛
+    b:'#8fd26b', B:'#4fa65b', s:'#e3c08a', S:'#6e5238',
+    // 夜枭
+    n:'#8c6d4f', N:'#5a4432', c:'#e3c08a',
+    // 场景
+    K:'#121212', k:'#242728', L:'#cdcdcd', z:'#9c9c9d'
+  };
+  const F = s => s.trim().split('\n').map(l => l.trim());
+
+  const CAT = {
+    idle: F(`
+      ..o........o....
+      .opo......opo...
+      .oodoodoodooo...
+      .oooooooooooo...
+      .ooeoooooooeo...
+      .odoooooooodo...
+      .oohhhphhhooo...
+      ..ohhhhhhhho....
+      ...ohhhhhho.....
+      ..ddodhhdodd....
+      .odoodhhdoodo...
+      .oo.dddddd.oo...
+      .dd.oooooo.dd...
+      .hh........hh...`),
+    typeL: F(`
+      ..o........o....
+      .opo......opo...
+      .oodoodoodooo...
+      .oooooooooooo...
+      .ooeoooooooeo...
+      .odoooooooodo...
+      .oohhhphhhooo...
+      ..ohhhhhhhho....
+      ...ohhhhhho.....
+      ..ddodhhdodd....
+      .odoodhhdoodo...
+      .oo.dddddd.oo...
+      .dd.oooooo.dd...
+      ...........hh...`),
+    typeR: F(`
+      ..o........o....
+      .opo......opo...
+      .oodoodoodooo...
+      .oooooooooooo...
+      .ooeoooooooeo...
+      .odoooooooodo...
+      .oohhhphhhooo...
+      ..ohhhhhhhho....
+      ...ohhhhhho.....
+      ..ddodhhdodd....
+      .odoodhhdoodo...
+      .oo.dddddd.oo...
+      .dd.oooooo.dd...
+      .hh.............`),
+    look: F(`
+      ..o........o....
+      .opo......opo...
+      .oodoodoodooo...
+      .oodooooooodoo..
+      .ooeoooooooeo...
+      .odoooooooodo...
+      .oohhhphhhooo...
+      ..ohhhhhhhho....
+      ...ohhhhhho.....
+      ..ddodhhdodd....
+      .odoodhhdoodo...
+      .oo.dddddd.oo...
+      .dd.oooooo.dd...
+      .hh........hh...`),
+    blink: F(`
+      ..o........o....
+      .opo......opo...
+      .oodoodoodooo...
+      .oooooooooooo...
+      .oodoooooooodo..
+      .odoooooooodo...
+      .oohhhphhhooo...
+      ..ohhhhhhhho....
+      ...ohhhhhho.....
+      ..ddodhhdodd....
+      .odoodhhdoodo...
+      .oo.dddddd.oo...
+      .dd.oooooo.dd...
+      .hh........hh...`),
+    night: F(`
+      ..o........o....
+      .opo......opo...
+      .oodoodoodooo...
+      .oooooooooooo...
+      .oodeoooooodeo..
+      .odoooooooodo...
+      .oohhhphhhooo...
+      ..ohhhhhhhho....
+      ...ohhhhhho.....
+      ..ddodhhdodd....
+      .odoodhhdoodo...
+      .oo.dddddd.oo...
+      .dd.oooooo.dd...
+      .hh........hh...`),
+    sleep: F(`
+      ................
+      ................
+      ................
+      ..o........o....
+      .opo......opo...
+      .oodoodoodooo...
+      .odoooooooodo...
+      .oodoooooooodo..
+      .oooooooooooo...
+      .oohhhphhhooo...
+      .oooooooooooooo.
+      oddoodoodoodddo.
+      ooooooooooooooo.
+      .hhoooooooooohh.`)
+  };
+
+
+  // 桌面小物：灯（8×14）、键盘（24×6）
+  const LAMP = F(`
+    ..zzzz..
+    .zLLLLz.
+    .zLLLLz.
+    ..zzzz..
+    ....z...
+    ....z...
+    ....z...
+    ....z...
+    ....z...
+    ....z...
+    ....z...
+    ....z...
+    ...zzz..
+    ..zzzzz.`);
+  const KEYBOARD = F(`
+    kkkkkkkkkkkkkkkkkkkk
+    kKkKkKkKkKkKkKkKkKkk
+    kkkkkkkkkkkkkkkkkkkk
+    kKKKKKKKKKKKKKKKKKkk`);
+
+  function drawGrid(ctx, grid, x, y, s, mono, rowFrom = 0) {
+    for (let r = rowFrom; r < grid.length; r++) {
+      const row = grid[r];
+      for (let c = 0; c < row.length; c++) {
+        const ch = row[c];
+        if (ch === '.') continue;
+        ctx.fillStyle = mono ? '#9c9c9d' : (PAL[ch] || '#f0f');
+        ctx.fillRect(x + c * s, y + r * s, s, s);
+      }
+    }
+  }
+
+  // ───────────────────────── 图鉴 ─────────────────────────
+  const PETS = [
+    { id:'cat', name:'Midi', kind:'RESIDENT', frames:CAT, show:['idle','typeL','typeR','look','night','sleep'],
+      colors:['#b5b7bb','#25262b','#eeeeeb','#a3c257','#c07b7b'],
+      rows:[['身份','常驻，也是唯一。字是墨，猫叫Midi'],['认什么','此刻你在不在打；今天你在哪打得多；现在几点'],['会做','跟你敲键盘、抬头看你、趴下睡、每 500 字跳一下、深夜眯眼'],['不做','不数落、不催、不因为你没打字而变样、不换成别的猫']] }
+  ];
+  const petsEl = document.getElementById('pets'); petsEl.style.gridTemplateColumns='1fr';
+  const galleryCanvases = [];
+  for (const p of PETS) {
+    const card = document.createElement('article'); card.className = 'pet';
+    card.innerHTML = `<div class="pet-head"><h3>${p.name}</h3><span class="tag">${p.kind}</span></div>
+      <div class="frames"></div>
+      <dl>${p.rows.map(([k,v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>
+      <div class="swatches">${p.colors.map(c => `<i class="sw" style="background:${c}" title="${c}"></i>`).join('')}</div>`;
+    const fr = card.querySelector('.frames');
+    for (const st of p.show) {
+      const f = document.createElement('div'); f.className = 'frame';
+      const cv = document.createElement('canvas'); cv.width = 64; cv.height = 56;
+      f.appendChild(cv); const lab = document.createElement('span'); lab.textContent = st; f.appendChild(lab);
+      fr.appendChild(f); galleryCanvases.push({ cv, grid: p.frames[st] });
+    }
+    petsEl.appendChild(card);
+  }
+  function paintGallery(mono) {
+    for (const { cv, grid } of galleryCanvases) {
+      const ctx = cv.getContext('2d'); ctx.clearRect(0, 0, 64, 56); drawGrid(ctx, grid, 0, 0, 4, mono);
+    }
+  }
+  paintGallery(false);
+  document.getElementById('silhouette').addEventListener('change', e => paintGallery(e.target.checked));
+
+  // ───────────────────────── 样机缩放 ─────────────────────────
+  const frame = document.getElementById('frame'), device = document.getElementById('device');
+  function fit() {
+    const w = frame.clientWidth; const s = Math.min(2, w / 480);
+    device.style.transform = `scale(${s})`; frame.style.height = `${270 * s}px`;
+  }
+  new ResizeObserver(fit).observe(frame); fit();
+
+  // 时钟
+  const clockEl = document.getElementById('clock');
+  const tickClock = () => { const d = new Date(); clockEl.textContent = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; };
+  tickClock(); setInterval(tickClock, 10000);
+
+  // ───────────────────────── 场景状态机 ─────────────────────────
+  const scene = document.getElementById('scene'), sctx = scene.getContext('2d');
+  const countEl = document.getElementById('count'), stateEl = document.getElementById('state'),
+        flowTxt = document.getElementById('flowTxt');
+  const S = {
+    count: 2418, lastKey: 0, paw: 0, flow: 0, blinkAt: 0, blinkUntil: 0,
+    hopUntil: 0, litKey: -1, litUntil: 0,
+    milestoneNext: 2500
+  };
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const box = document.getElementById('typebox');
+  let prevLen = box.value.length;
+  box.addEventListener('input', () => {
+    const len = box.value.length, delta = len - prevLen; prevLen = len;
+    if (delta <= 0) return;
+    const now = performance.now();
+    S.count += delta; S.lastKey = now; S.paw ^= 1;
+    S.flow = Math.min(1, S.flow + 0.03 * delta);
+    S.litKey = Math.floor(Math.random() * 9); S.litUntil = now + 90;
+    countEl.textContent = String(S.count);
+    if (S.count >= S.milestoneNext) { S.milestoneNext += 100; S.hopUntil = now + 480; }
+  });
+
+  // 模拟按钮
+  let night = false;
+  document.getElementById('simBurst').addEventListener('click', () => {
+    let n = 0; const t = setInterval(() => { box.value += '字'; box.dispatchEvent(new Event('input')); if (++n >= 60) clearInterval(t); }, 70);
+  });
+  const nightBtn = document.getElementById('simNight');
+  nightBtn.addEventListener('click', () => { night = !night; nightBtn.setAttribute('aria-pressed', String(night)); });
+
+  // 布局常量（场景坐标，304×212，像素倍率 4）
+  const PX = 4, DESK_Y = 176, CAT_X = 96, CAT_Y = DESK_Y - 14 * PX + 4, KB_X = 84, KB_Y = DESK_Y - 4 * PX + 2,
+        LAMP_X = 12, LAMP_Y = DESK_Y - 14 * PX;
+
+  function catFrame(now) {
+    const idle = now - S.lastKey;
+    if (idle < 600) return S.paw ? CAT.typeL : CAT.typeR;
+    if (idle > 12000) return CAT.sleep;
+    if (now < S.blinkUntil) return CAT.blink;
+    if (night) return CAT.night;
+    if (idle > 4000) return CAT.look;
+    if (now > S.blinkAt) { S.blinkAt = now + 3000 + Math.random() * 4000; S.blinkUntil = now + 110; }
+    return CAT.idle;
+  }
+  function stateText(now) {
+    const idle = now - S.lastKey;
+    if (!S.lastKey) return 'Midi在等你';
+    if (idle < 600) return 'Midi在打字';
+    if (idle > 12000) return 'Midi睡着了';
+    if (idle > 4000) return night ? 'Midi眯着眼看你' : 'Midi在看你';
+    return night ? 'Midi困了' : 'Midi在歇爪';
+  }
+
+  let lastT = performance.now(), flowSlot = 0;
+  function render(now) {
+    const dt = (now - lastT) / 1000; lastT = now;
+    // 心流灯：停 2 秒后开始缓慢衰减，不归零（底 0.06）
+    if (now - S.lastKey > 2000) S.flow = Math.max(S.lastKey ? 0.06 : 0, S.flow - 0.03 * dt);
+    const slot = S.flow > 0.66 ? 3 : S.flow > 0.33 ? 2 : S.flow > 0.02 ? 1 : 0;
+    if (slot !== flowSlot) { flowSlot = slot; flowTxt.textContent = ['灯灭','微亮','亮着','很亮'][slot]; }
+
+    sctx.clearRect(0, 0, 304, 212);
+    const dim = night ? 0.55 : 1; sctx.globalAlpha = dim;
+    // 灯光：一个硬边像素光锥，透明度 = flow（颜色允许平滑，位移不允许）
+    if (S.flow > 0) {
+      sctx.fillStyle = `rgba(242,193,78,${(0.04 + S.flow * 0.22).toFixed(3)})`;
+      sctx.beginPath(); sctx.moveTo(LAMP_X + 8, LAMP_Y + 16); sctx.lineTo(LAMP_X - 8, DESK_Y); sctx.lineTo(LAMP_X + 120, DESK_Y); sctx.closePath(); sctx.fill();
+      sctx.fillStyle = `rgba(242,193,78,${(S.flow * 0.9).toFixed(3)})`;
+      sctx.fillRect(LAMP_X + 4, LAMP_Y + 4, 16, 8);
+    }
+    drawGrid(sctx, LAMP, LAMP_X, LAMP_Y, PX, false);
+    // 桌面线
+    sctx.fillStyle = '#242728'; sctx.fillRect(0, DESK_Y, 304, 2);
+    sctx.fillStyle = '#0d0d0d'; sctx.fillRect(0, DESK_Y + 2, 304, 36);
+    // 猫的影子：灯越亮影子越长（一格一格来）
+    const shadowLen = Math.round(S.flow * 3) * PX;
+    if (shadowLen) { sctx.fillStyle = '#101111'; sctx.fillRect(CAT_X + 60, DESK_Y + 2, shadowLen + 8, 6); }
+    // 猫（里程碑小跳：2 格上、2 格下）
+    let hop = 0;
+    if (now < S.hopUntil && !reduced) { const ph = (S.hopUntil - now) / 480; hop = ph > 0.4 ? -2 * PX : 0; }
+    const idleBob = (!reduced && now - S.lastKey > 600 && now - S.lastKey < 12000 && Math.floor(now / 600) % 2) ? -1 : 0;
+    const cf = catFrame(now), cy = CAT_Y + hop + idleBob;
+    drawGrid(sctx, cf, CAT_X, cy, PX, false);
+    // 键盘画在猫前面（它坐在桌子后面），再把爪子那三行补画到键盘上：爪子在键上，不在键后
+    drawGrid(sctx, KEYBOARD, KB_X, KB_Y, PX, false);
+    if (now < S.litUntil && S.litKey >= 0) { sctx.fillStyle = '#f4f4f6'; sctx.fillRect(KB_X + (1 + S.litKey * 2) * PX, KB_Y + (S.paw ? 3 : 1) * PX, PX, PX); }
+    if (cf !== CAT.sleep) drawGrid(sctx, cf, CAT_X, cy, PX, false, 11);
+    // 睡觉的 z
+    if (now - S.lastKey > 12000 && S.lastKey) {
+      sctx.fillStyle = '#9c9c9d'; const zph = Math.floor(now / 700) % 3;
+      for (let i = 0; i <= zph; i++) sctx.fillRect(CAT_X + 66 + i * 6, CAT_Y + 10 - i * 8, 3, 3);
+    }
+    sctx.globalAlpha = 1;
+    const st = stateText(now); if (stateEl.textContent !== st) stateEl.textContent = st;
+    requestAnimationFrame(render);
+  }
+  requestAnimationFrame(render);
+})();
+</script>

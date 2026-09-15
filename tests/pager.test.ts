@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  ack, create, DEFAULT_CONFIG, interruptAttention, interruptEvent, manual,
-  manualPaused, ORDER_ALL, orderFor, setAuto, setOrder, showPage, step, tick
+  ack, create, DEFAULT_CONFIG, dwellFor, interruptAttention, interruptEvent, manual,
+  interruptTyping, manualPaused, ORDER_ALL, orderFor, setAuto, setOrder, showPage, step, tick
 } from '../src/renderer/pager.js'
 import type { PagerConfig, PagerState } from '../src/renderer/pager.js'
 
@@ -12,7 +12,7 @@ const T0 = 1_000_000
 const at = (s: PagerState, ms: number): PagerState => tick(s, ms, CFG)
 
 describe('节奏默认值', () => {
-  it('六页 dwell 与新事件钉住都是 60s，手动暂停 120s（tokens.css §14）', () => {
+  it('七页 dwell 与新事件钉住都是 60s，手动暂停 120s（tokens.css §14）', () => {
     expect(DEFAULT_CONFIG.dwellA).toBe(60_000)
     expect(DEFAULT_CONFIG.dwellB).toBe(60_000)
     expect(DEFAULT_CONFIG.dwellC).toBe(60_000)
@@ -21,14 +21,20 @@ describe('节奏默认值', () => {
   })
 })
 
-describe('页序（v2 六页）', () => {
-  it('全序是 A → B → C1 → C2 → D → E', () => {
-    expect(ORDER_ALL).toEqual(['a', 'b', 'c1', 'c2', 'd', 'e'])
+describe('页序（七页）', () => {
+  it('全序是 A → B → C1 → C2 → D → E → F', () => {
+    expect(ORDER_ALL).toEqual(['a', 'b', 'c1', 'c2', 'd', 'e', 'f'])
   })
 
   it('C2 空时它不在轮播里 —— 它是 C1 的溢出页，空的就是一页空白', () => {
-    expect(orderFor(false)).toEqual(['a', 'b', 'c1', 'd', 'e'])
+    expect(orderFor(false)).toEqual(['a', 'b', 'c1', 'd', 'e', 'f'])
     expect(orderFor(true)).toEqual(ORDER_ALL)
+  })
+
+  it('F 与 D/E 同 dwell（简报 brief-midi.md §4）', () => {
+    const s = create(T0, {}, CFG)
+    expect(dwellFor(s, 'f', CFG)).toBe(CFG.dwellC)
+    expect(dwellFor(s, 'f', CFG)).toBe(dwellFor(s, 'e', CFG))
   })
 
   it('setOrder：列表没变就原样返回（每帧都会调，不该每帧都造新对象）', () => {
@@ -56,14 +62,15 @@ describe('定时轮播', () => {
     expect(at(s, T0 + 59_999).page).toBe('a')
   })
 
-  it('C2 空时：A → B → C1 → D → E → A，每页停满一个 dwell', () => {
+  it('C2 空时：A → B → C1 → D → E → F → A，每页停满一个 dwell', () => {
     let s = create(T0, {}, CFG)
     s = at(s, T0 + 60_000); expect(s.page).toBe('b')
     s = at(s, T0 + 119_999); expect(s.page).toBe('b')
     s = at(s, T0 + 120_000); expect(s.page).toBe('c1')
     s = at(s, T0 + 180_000); expect(s.page).toBe('d')
     s = at(s, T0 + 240_000); expect(s.page).toBe('e')
-    s = at(s, T0 + 300_000); expect(s.page).toBe('a')
+    s = at(s, T0 + 300_000); expect(s.page).toBe('f')
+    s = at(s, T0 + 360_000); expect(s.page).toBe('a')
   })
 
   it('C2 非空时它排在 C1 之后', () => {
@@ -73,7 +80,8 @@ describe('定时轮播', () => {
     s = at(s, T0 + 180_000); expect(s.page).toBe('c2')
     s = at(s, T0 + 240_000); expect(s.page).toBe('d')
     s = at(s, T0 + 300_000); expect(s.page).toBe('e')
-    s = at(s, T0 + 360_000); expect(s.page).toBe('a')
+    s = at(s, T0 + 360_000); expect(s.page).toBe('f')
+    s = at(s, T0 + 420_000); expect(s.page).toBe('a')
   })
 
   it('轮播关闭后不推进，重新打开从当前页重新计时而不是立刻翻页', () => {
@@ -176,10 +184,10 @@ describe('手动切换', () => {
   })
 
   it('← / → 在轮播列表里环形走，不会走进 attn 页', () => {
-    let s = create(T0, {}, CFG)           // C2 空 → a b c1 d e
+    let s = create(T0, {}, CFG)           // C2 空 → a b c1 d e f
+    s = step(s, -1, T0, CFG); expect(s.page).toBe('f')
     s = step(s, -1, T0, CFG); expect(s.page).toBe('e')
-    s = step(s, -1, T0, CFG); expect(s.page).toBe('d')
-    s = step(s, 1, T0, CFG); expect(s.page).toBe('e')
+    s = step(s, 1, T0, CFG); expect(s.page).toBe('f')
     s = step(s, 1, T0, CFG); expect(s.page).toBe('a')
   })
 
@@ -255,5 +263,44 @@ describe('纯度', () => {
     expect(Object.keys(create(T0, {}, CFG)).sort())
       .toEqual(['attention', 'auto', 'dwellUntil', 'eventHold', 'holdUntil', 'order', 'page'])
     expect(run()).toEqual(run())
+  })
+})
+
+describe('打断 3 · 打字（M5）', () => {
+  it('从别的页跳到 F，最后一个键之后停满 dwellTyping 才恢复轮播', () => {
+    let s = manual(create(T0, {}, CFG), 'd', T0 - 200_000, CFG)   // 手动暂停早已过期
+    s = interruptTyping(s, T0, CFG)
+    expect(s.page).toBe('f')
+    expect(s.dwellUntil).toBe(T0 + CFG.dwellTyping)
+    expect(at(s, T0 + CFG.dwellTyping - 1).page).toBe('f')
+    expect(at(s, T0 + CFG.dwellTyping).page).toBe('a')            // f 的下一页回到 a
+  })
+
+  it('已经在 F 页：每个键都把到期往后推，不翻页', () => {
+    let s = interruptTyping(create(T0, {}, CFG), T0, CFG)
+    s = interruptTyping(s, T0 + 10_000, CFG)
+    expect(s.page).toBe('f')
+    expect(s.dwellUntil).toBe(T0 + 10_000 + CFG.dwellTyping)
+  })
+
+  it('已在 F 页且到期更晚（定时轮播的 60 s）时原样返回，不把到期往前拉', () => {
+    const s = showPage(create(T0, {}, CFG), 'f', T0, CFG)         // dwellC 60 s
+    expect(interruptTyping(s, T0 + 1_000, CFG)).toBe(s)
+  })
+
+  it('让位：attention 接管、手动暂停中、新事件钉住的 C1 都不抢', () => {
+    const base = create(T0, {}, CFG)
+    expect(interruptTyping(interruptAttention(base, T0), T0, CFG).page).toBe('attn')
+    expect(interruptTyping(manual(base, 'b', T0, CFG), T0 + 1_000, CFG).page).toBe('b')
+    expect(interruptTyping(interruptEvent(base, T0, CFG), T0 + 1_000, CFG).page).toBe('c1')
+  })
+
+  it('手动暂停过期之后打字又能抢了', () => {
+    const s = manual(create(T0, {}, CFG), 'b', T0, CFG)
+    expect(interruptTyping(s, T0 + CFG.manualHold, CFG).page).toBe('f')
+  })
+
+  it('默认 dwellTyping 30 s（tokens.css --dwell-typing）', () => {
+    expect(DEFAULT_CONFIG.dwellTyping).toBe(30_000)
   })
 })
