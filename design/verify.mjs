@@ -14,7 +14,9 @@ const CANVASES = [
   { px: 1.19, h: 270, label: '403x270' },
   { px: 1.19, h: 320, label: '403x320' },
 ];
-const STATES = ['populated', 'loading', 'empty', 'error', 'edge', 'attention', 'running'];
+// REVISION 10 · 新增 full：三家同时 100%、7d 也 100%。edge 保留 97 / 82 / 61
+// （danger / warn / ok 三档同屏），两个场景各管一件事——edge 管层级，full 管最宽的数字。
+const STATES = ['populated', 'loading', 'empty', 'error', 'edge', 'full', 'attention', 'running'];
 const FONT_FLOOR = 14;                       // R4-06 · 轮播版把下限从 12 抬到 14
 // R5-05 · 间距栅格与「允许的例外」。这份清单必须与 tokens.css §6 逐字对应；
 // 断言不再靠手写核对，而是运行时扫描全部 gap/padding/margin 后与它比集合。
@@ -291,6 +293,52 @@ for (const cv of CANVASES) {
         }
       }
 
+      // 4l · REVISION 10 · 100% 那一屏：数字与「%」必须同基线，且三位数确实降了档。
+      //      「同基线」是这条修复最容易做丢的一半——把 % 缩小时若用了 vertical-align
+      //      或不同的 line-height，两者会错开半个字高，而溢出断言看不见这件事。
+      const numBase = [];
+      if (live && live.dataset.p === 'a') {
+        for (const nums of live.querySelectorAll('.a-nums')) {
+          const num = nums.querySelector('.num'), unit = nums.querySelector('.unit');
+          if (!num || !unit) continue;
+          /* 量基线本身，不量 box 的底：baseline 对齐时两个 box 的 bottom 差的是
+             各自的 descender，而 descender 随字号走（52 / 16px 差出 7 画布 px），
+             拿 bottom 比就会把「对齐的」报成「没对齐」。
+             零高度的 inline-block 的底边恰好落在所在行盒的基线上，与字体无关。 */
+          const baseOf = host => {
+            const i = document.createElement('i');
+            i.style.cssText = 'display:inline-block;width:0;height:0;vertical-align:baseline';
+            host.appendChild(i);
+            const y = i.getBoundingClientRect().bottom;
+            i.remove();
+            return y;
+          };
+          const nb = baseOf(num), ub = baseOf(unit);
+          const fs = parseFloat(getComputedStyle(num).fontSize);
+          if (Math.abs(nb - ub) > 1) numBase.push(`数字与 % 不同基线（差 ${(nb - ub).toFixed(1)}px）`);
+          if (nums.dataset.wide === '1' && fs > 52.5) numBase.push(`三位数没有降档（仍是 ${fs}px）`);
+          if (nums.dataset.wide !== '1' && fs < 64) numBase.push(`两位数被降了档（${fs}px < 64）`);
+          if (unit.getBoundingClientRect().width < 1) numBase.push('% 没有渲染出来');
+        }
+      }
+
+      // 4m · REVISION 10 · B 页模型短名：≤10 字符；没有模型数据时不出现「·」。
+      const modelBad = [];
+      if (live && live.dataset.p === 'b') {
+        for (const h of live.querySelectorAll('.b-head')) {
+          const m = h.querySelector('.b-model');
+          if (!m) continue;
+          const txt = (m.textContent || '').replace(/^·\s*/, '').trim();
+          if (!txt) modelBad.push('有「·」却没有模型名');
+          if (txt.length > 10) modelBad.push(`模型短名超过 10 字符：${txt}`);
+          /* 与 E-1 同一套口径：允许省略，不允许省略到读不出是哪个模型。
+             阈值 60% —— 打满 + 警示图标那一屏（full）宽度最紧，短名会让掉一截，
+             那是对的取舍（那一屏该被读的是额度不是模型），但不能让到只剩前缀。 */
+          if (m.clientWidth < m.scrollWidth * 0.6)
+            modelBad.push(`模型短名省略过半：${txt}（${m.clientWidth}/${m.scrollWidth}）`);
+        }
+      }
+
       // 4h · D-3 / D-4 · 页眉的三家数值是这块屏唯一的精确值出口（面板没有指针，
       //      hover 永远不会发生）。三家一个都不许缺——缺席要显式渲染成「—」。
       let dNums = '';
@@ -327,7 +375,7 @@ for (const cv of CANVASES) {
       }
       return {
         problems: out, accentEls, accent: accentEls.length, minFont, newsNoTime, fillWrong, heatCells,
-        hardClip, dNums, srcBad, heatLadder, newsLink,
+        hardClip, dNums, srcBad, heatLadder, newsLink, numBase, modelBad,
         offScale: [...new Set(offScale)], focusableHidden,
         headings: stage.querySelectorAll('h1,h2,h3,[role=heading]').length,
         statusEls: stage.querySelectorAll('[role="status"]').length,
@@ -360,6 +408,9 @@ for (const cv of CANVASES) {
     }
     // REVISION 9 · E 页整行可点
     for (const b of r.newsLink) r.problems.push(`E-LINK ${b}`);
+    // REVISION 10 · 100% 时的 A 页数字 / B 页模型短名
+    for (const b of r.numBase) r.problems.push(`A-NUM ${b}`);
+    for (const b of r.modelBad) r.problems.push(`B-MODEL ${b}`);
     // R5-01 · inert 断言
     if (r.focusableHidden > 0) r.problems.push(`INERT 非当前页仍有 ${r.focusableHidden} 个可聚焦元素`);
     // R5-05 · 例外清单断言：实测的 off-scale 集合必须等于声明的例外集合
@@ -389,7 +440,9 @@ for (const [n, v] of trackReportOnce || []) console.log(`  ${n.padEnd(22)} ${v}:
 // 挪到节奏断言后面，交付图里就会混进「模拟新事件」的行，而且看起来完全正常。
 // 顺序不是保证，断言才是：每张图拍之前验一遍画布里没有合成 id。
 const shotPurity = [];
+let shotCount = 0;
 async function assertClean(label) {
+  shotCount++;
   const dirty = await page.evaluate(() => {
     const bad = [];
     for (const r of document.querySelectorAll('#stage .row')) {
@@ -410,6 +463,13 @@ for (const px of [1.00, 1.19]) {
   await page.click('#segState button[data-s="populated"]');
   await page.waitForTimeout(320);
   for (const [p, name] of SHOT_PAGES) {
+    await page.click(`#segPage button[data-p="${p}"]`); await page.waitForTimeout(380);
+    await assertClean(`${name}${sfx}`);
+    await page.locator('#stage').screenshot({ path: `${SHOTS}/${name}${sfx}.png` });
+  }
+  // REVISION 10 · 额度打满那一屏也要留图：A 页三位数降档、B 页 100% 与 7d 100% 并排
+  await page.click('#segState button[data-s="full"]');
+  for (const [p, name] of [['a','page-a-full'],['b','page-b-full']]) {
     await page.click(`#segPage button[data-p="${p}"]`); await page.waitForTimeout(380);
     await assertClean(`${name}${sfx}`);
     await page.locator('#stage').screenshot({ path: `${SHOTS}/${name}${sfx}.png` });
@@ -702,7 +762,7 @@ console.log('  纯净模式下按 →:', JSON.stringify(pureManual));
 if (pureManual.pure !== '1') pure.push('纯净模式被 → 退出了');
 
 console.log('\n纯净模式问题:', pure.length ? pure : 'none');
-console.log('\n截图纯净度:', shotPurity.length ? shotPurity : 'none（14 张图里没有合成事件行）');
+console.log('\n截图纯净度:', shotPurity.length ? shotPurity : `none（${shotCount} 张图里没有合成事件行）`);
 console.log('\nconsole errors:', consoleErrors.length ? consoleErrors : 'none');
 console.log('节奏问题:', rhythm.length ? rhythm : 'none');
 console.log('布局问题:', problems.length ? JSON.stringify(problems, null, 1) : 'none');

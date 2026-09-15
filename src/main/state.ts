@@ -140,6 +140,9 @@ const SCENES: Record<SceneName, () => SceneBody> = {
     events: [],
     feedNotice: { tone: 'error', code: 'feed_error' }
   }),
+  /* edge 保持 97 / 82 / 61 —— 它的价值是 **danger / warn / ok 三档同屏**，
+     换成三家 100% 就把这个对照丢了（m5-designer 2026-09-15 明确要求别替换）。
+     三位数撑破版面那一格由下面的 full 场景负责。 */
   edge: () => ({
     generatedAt: QUOTA.generatedAt,
     loading: false,
@@ -155,6 +158,19 @@ const SCENES: Record<SceneName, () => SceneBody> = {
       agent('zcode', 'idle', ZCODE)
     ],
     events: edgeFeed()
+  }),
+  /* full = 三家 5h 与 7d 全部 100%（brief 第 9 条，用户实机撞到的那一格）。
+     A 页 64px 的「100」要 115.2px，而 panelX 1.19 下瓦片内宽只有 105.67px ——
+     R5-11 当年算的 133px 是 480 画布的数，结论只在一种画布上成立却被当成了结论。
+     这一帧存在的意义就是让「只在一种画布上成立」这件事以后必然被断言抓到。 */
+  full: () => ({
+    generatedAt: QUOTA.generatedAt,
+    loading: false,
+    agents: (['codex', 'claude', 'zcode'] as AgentId[]).map(id => {
+      const src = id === 'codex' ? CODEX : id === 'claude' ? CLAUDE : ZCODE
+      return agent(id, 'idle', src.map(w => ({ ...w, usedPercent: 100 })))
+    }),
+    events: baseFeed()
   }),
   attention: () => ({
     generatedAt: QUOTA.generatedAt,

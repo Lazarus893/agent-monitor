@@ -152,10 +152,11 @@ export type NewsData = {
 }
 
 export type SceneName =
-  | 'populated' | 'loading' | 'empty' | 'error' | 'edge' | 'attention' | 'running'
+  | 'populated' | 'loading' | 'empty' | 'error' | 'edge' | 'attention' | 'running' | 'full'
 
+/** `full`：三家额度全部 100%（brief-m0-v2 §9）。edge 仍是 danger/warn/ok 三档同屏。 */
 export const SCENE_NAMES: SceneName[] = [
-  'populated', 'loading', 'empty', 'error', 'edge', 'attention', 'running'
+  'populated', 'loading', 'empty', 'error', 'edge', 'attention', 'running', 'full'
 ]
 
 /** 画布尺寸：目标显示器逻辑 bounds 的一半，渲染层再 zoom: 2 铺回去。

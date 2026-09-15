@@ -7,8 +7,7 @@ import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  NAME_MAX, WINDOW_MS, claudeTopModel, countModels, displayName, plainName, recentTranscripts,
-  statuslineModel, topOf
+  NAME_MAX, SHORT_MAX, WINDOW_MS, claudeTopModel, countModels, displayName, plainName, recentTranscripts, shortModel, statuslineModel, topOf
 } from '../../src/main/collectors/topmodel.js'
 
 describe('countModels / topOf', () => {
@@ -121,5 +120,73 @@ describe('statusline 兜底', () => {
 
   it('没有文件 / 没有 model 时 undefined', async () => {
     expect(await statuslineModel(join(tmpdir(), 'nope-' + Date.now()))).toBeUndefined()
+  })
+})
+
+/* ==========================================================================
+   短名（brief-m0-v2 §10）：B 页那一格是「产品名 · 模型」，模型那半只有几个字符。
+   下面这批 id **全部是本机当场抓的**（~/.claude/projects 的转录、
+   ~/.codex/sessions 的 rollout、~/.zcode 的 tasks 表），不是编的。
+   ========================================================================== */
+
+describe('shortModel · 实测 id', () => {
+  it('Claude：家族名 + 版本号，连字符版本合成小数点', () => {
+    expect(shortModel('claude-fable-5-1')).toBe('Fable 5.1')
+    expect(shortModel('claude-opus-5')).toBe('Opus 5')
+    expect(shortModel('claude-opus-4-6')).toBe('Opus 4.6')
+    expect(shortModel('claude-sonnet-5')).toBe('Sonnet 5')
+    expect(shortModel('claude-haiku-4-5')).toBe('Haiku 4.5')
+  })
+
+  it('Claude：转录里还出现过裸的家族名', () => {
+    expect(shortModel('opus')).toBe('Opus')
+    expect(shortModel('sonnet')).toBe('Sonnet')
+  })
+
+  it('Codex：代号就是产品名，没有代号才退回 GPT-<版本>', () => {
+    expect(shortModel('gpt-6-astra')).toBe('Astra')
+    expect(shortModel('gpt-5.6-sol')).toBe('Sol')
+    expect(shortModel('gpt-5.6')).toBe('GPT-5.6')
+  })
+
+  it('ZCode：去供应商路径与 $档位，档位词（Flash/Air）不进短名', () => {
+    expect(shortModel('builtin:bigmodel-coding-plan/GLM-5.3-Flash')).toBe('GLM-5.3')
+    expect(shortModel('builtin:bigmodel-coding-plan/GLM-5.3$high')).toBe('GLM-5.3')
+    expect(shortModel('builtin:bigmodel-coding-plan/GLM-5.3$max')).toBe('GLM-5.3')
+    expect(shortModel('builtin:bigmodel-coding-plan/GLM-5.2')).toBe('GLM-5.2')
+    expect(shortModel('GLM-5')).toBe('GLM-5')
+    expect(shortModel('GLM-5.3-Flash')).toBe('GLM-5.3')
+  })
+
+  it('三家出来的都塞得进那一格（≤10 字符）', () => {
+    for (const id of [
+      'claude-fable-5-1', 'claude-opus-4-6', 'gpt-6-astra', 'gpt-5.6-sol',
+      'builtin:bigmodel-coding-plan/GLM-5.3-Flash'
+    ]) {
+      expect(shortModel(id)!.length).toBeLessThanOrEqual(SHORT_MAX)
+    }
+  })
+})
+
+describe('shortModel · 兜底', () => {
+  it('不认识的：去厂商前缀取最后一段、首字母大写、截到 10', () => {
+    expect(shortModel('some-vendor-nova')).toBe('Nova')
+    expect(shortModel('acme-verylongmodelname')).toBe('Verylongm…')
+    expect(shortModel('acme-verylongmodelname')!.length).toBe(SHORT_MAX)
+  })
+
+  it('没有连字符就原样（只做首字母大写与截断）', () => {
+    expect(shortModel('mystery')).toBe('Mystery')
+  })
+
+  it('占位符原样留着 —— 猜一个名字比显示占位更糟', () => {
+    expect(shortModel('<synthetic>')).toBe('<syntheti…')
+  })
+
+  it('空 / undefined → undefined（渲染层留空，不写「未知」）', () => {
+    expect(shortModel(undefined)).toBeUndefined()
+    expect(shortModel('')).toBeUndefined()
+    expect(shortModel('   ')).toBeUndefined()
+    expect(shortModel('builtin:plan/')).toBeUndefined()
   })
 })

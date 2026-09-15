@@ -404,8 +404,18 @@ function renderPageB(): void {
     const a = AGENTS[t.agent]
     const lv = t.phase === 'ok' ? level(t.windows[0].usedPercent) : 'ok'
     const off = t.phase !== 'ok' || t.status === 'offline'
+    /* REVISION 10 · 模型短名跟在产品名后面。四条都不显示：
+       ① 没有模型数据（分隔符是关系，不是装饰，连「·」也不出现）；
+       ② 这一行有状态词（等待你批准 / 运行中）—— 一行只带一个从属信息，
+          而状态词永远比「用得最多的模型」更该被看到；
+       ③ warn / danger 档 —— 那一刻该被读到的是余量，不是模型；
+       ④ stale（M2 的扩展）—— 该说的是「数字有多旧」。 */
+    const word = t.status === 'attention' ? '等待你批准' : t.status === 'running' ? '运行中' : ''
+    // Tile 是判别联合：stale / topModel 只在 ok 那一支上有，所以先收窄再取
+    const model = t.phase === 'ok' && !word && !t.stale && lv === 'ok' ? (t.topModel ?? '') : ''
     const nameCell = `<h2 class="b-name"><span class="iddot"${off ? ' data-off="1"' : ''}></span>` +
-      `<span class="t">${esc(a.name)}</span></h2>`
+      `<span class="t">${esc(a.name)}</span>` +
+      (model ? `<span class="b-model">· ${esc(model)}</span>` : '') + '</h2>'
     let inner: string
     if (t.phase === 'loading') {
       inner = `<div class="b-head">${nameCell}<span class="b-verdict"><span class="loading-label sr" role="status">读取中</span></span></div>
@@ -421,10 +431,12 @@ function renderPageB(): void {
       /* v2 §2 · 判语整句删掉，原位置改显示「当前窗口用得最多的模型名」。
          「够不够撑到重置」不丢：它由时间带上填充与「现在」游标的落差承担。
          stale 时仍然让位给「数据 N 分钟前」—— 那一刻更该说的是数字有多旧。 */
-      inner = `<div class="b-head">${nameCell}
-        <span class="b-verdict"${t.stale
-          ? ` data-tone="mute" data-stale="${esc(t.stale.since)}"`
-          : ` data-model="${esc(t.topModel ?? '')}" data-status="${t.status}"`}></span>
+      inner = `<div class="b-head b-head-ok">${nameCell}
+        ${t.stale
+          ? `<span class="b-verdict" data-tone="mute" data-stale="${esc(t.stale.since)}"></span>`
+          : word
+            ? `<span class="b-verdict" data-tone="${t.status === 'attention' ? 'attn' : 'mute'}">${esc(word)}</span>`
+            : ''}
         ${lv === 'ok' ? '' : `<span class="b-alert" aria-label="${lv === 'danger' ? '余量吃紧' : '余量偏紧'}">${svg('alert', 14)}</span>`}
         <span class="b-pc mono">${w5.usedPercent}%</span>
         ${w7 ? `<span class="b-sec mono">${esc(w7.label)} ${w7.usedPercent}%</span>` : ''}
@@ -760,13 +772,8 @@ function tickTiles(): void {
      「够不够撑到重置」不丢：它由时间带上填充与「现在」游标的落差承担，
      不再用一句话复述 —— 那句话在 14px 上本来也只是被扫过去而不是被读。
      还没采到 topModel 时整格留空，不写「未知」占位。 */
-  document.querySelectorAll<HTMLElement>('[data-model]').forEach(n => {
-    const st = n.dataset.status
-    if (st === 'attention') { n.dataset.tone = 'attn'; n.textContent = '等待你批准'; return }
-    n.dataset.tone = 'model'
-    const m = n.dataset.model ?? ''
-    n.textContent = !m ? '' : st === 'running' ? `运行中 · ${m}` : m
-  })
+  /* REVISION 10 起这里没有 [data-model] 要刷了：模型短名是 nameCell 里的静态文本，
+     状态词也在 renderPageB 里就定好。留这段空跑一遍只是浪费一次 querySelectorAll。 */
 }
 
 function tickFeed(): void {

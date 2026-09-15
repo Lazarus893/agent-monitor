@@ -14,7 +14,7 @@ import type { AgentId, NewsData, UsageData } from '../../shared/types.js'
 import type { Store } from '../state.js'
 import type { EventsHandle } from './events/index.js'
 import { NewsCollector } from './news.js'
-import { claudeTopModel, plainName, topOf, WINDOW_MS, REFRESH_MS as MODEL_MS } from './topmodel.js'
+import { claudeTopModel, shortModel, topOf, WINDOW_MS, REFRESH_MS as MODEL_MS } from './topmodel.js'
 import { REFRESH_MS as USAGE_MS, collectUsage, logLine } from './usage.js'
 
 const USAGE_CACHE = 'usage.json'
@@ -88,9 +88,12 @@ export function startV2(
     }
     try {
       const picks: Partial<Record<AgentId, string | undefined>> = {
-        codex: plainName(topOf(events.codex.modelCounts(WINDOW_MS))),
-        zcode: plainName(topOf(events.zcode.modelCounts(WINDOW_MS))),
-        claude: await claudeTopModel()
+        /* 三家都出短名（brief-m0-v2 §10）：B 页那一格是「产品名 · 模型」，
+           模型那半只有几个字符，放的必须是认得出是哪个模型的最短形式，
+           而不是把完整 id 截断成 `GLM-5.3-Fl…`。 */
+        codex: shortModel(topOf(events.codex.modelCounts(WINDOW_MS))),
+        zcode: shortModel(topOf(events.zcode.modelCounts(WINDOW_MS))),
+        claude: await claudeTopModel(undefined, undefined, undefined, shortModel)
       }
       for (const id of ['codex', 'claude', 'zcode'] as AgentId[]) store.setTopModel(id, picks[id])
       const shown = (['codex', 'claude', 'zcode'] as AgentId[])

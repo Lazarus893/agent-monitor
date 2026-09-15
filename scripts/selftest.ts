@@ -55,6 +55,9 @@ class SkipConnectCheck extends Error {}
  * 归档用的交付截图由 `pnpm shoot`（七态对账）与 `MONITOR_SHOTS_LIVE_DIR`（真实六页）产出，
  * 这里的只是自检过程的留档。
  */
+/** 轮播里的全部页（含 attn）。截图与逐格量尺都按它走，加页只改这一处。 */
+const ALL_PAGES: Page[] = ['a', 'b', 'c1', 'c2', 'd', 'e', 'attn']
+
 const shotDir = (sub: string): string => join(process.cwd(), 'design', 'shots', 'selftest', sub)
 
 /** 当前页里有没有任何可见元素越出 .screen。.sr 是 1px 的屏幕阅读器锚点，按定义在框外。 */
@@ -921,9 +924,12 @@ export async function runSelftest(win: BrowserWindow, store?: Store): Promise<bo
     const CANVASES: Array<{ w: number; h: number; tag: string }> = [
       { w: 480, h: 270, tag: '480×270' },
       { w: 480, h: 320, tag: '480×320' },
-      { w: 403, h: 270, tag: '403×270（panelX 1.19）' }
+      { w: 403, h: 270, tag: '403×270（panelX 1.19）' },
+      /* 最窄的一档：原生 960×640 模式下再叠上 1.19 的补偿。
+         A 页瓦片在这里只有 ~118px，三位数额度撑不撑得住要在这一档量。 */
+      { w: 403, h: 320, tag: '403×320（960×640 + panelX 1.19）' }
     ]
-    const PAGES: Page[] = ['a', 'b', 'c1', 'c2', 'd', 'e', 'attn']
+    const PAGES = ALL_PAGES
     const STATES = SCENE_NAMES
 
     for (const cv of CANVASES) {
@@ -954,7 +960,7 @@ export async function runSelftest(win: BrowserWindow, store?: Store): Promise<bo
         small.length ? small.slice(0, 3).join(' | ') + `（共 ${small.length}）` : '最小字号 ≥ 14px')
     }
 
-    // 8 · v2 截图：7 页 × 7 态到 design/shots/m3/（panelX 补偿后的 403×270 几何）
+    // 8 · v2 截图：全部页 × 全部态（panelX 补偿后的 403×270 几何）
     try {
       await js(win, `(() => { const r = document.documentElement.style
         r.setProperty('--canvas-w','403px'); r.setProperty('--canvas-h','270px')
@@ -974,9 +980,13 @@ export async function runSelftest(win: BrowserWindow, store?: Store): Promise<bo
       }
       store.setLive()
       await sleep(200)
-      check('v2 七页 × 七态截图已出图', n === 49, `${n} 张 → ${dir}`)
+      /* 张数由页数 × 态数推出来，别写死：加一个场景（本轮的 full）就会红，
+         而红的原因跟被测的东西无关 —— 写死 49 的那一版就是这么红的。 */
+      const want = ALL_PAGES.length * SCENE_NAMES.length
+      check(`v2 ${ALL_PAGES.length} 页 × ${SCENE_NAMES.length} 态截图已出图`, n === want,
+        `${n}/${want} 张 → ${dir}`)
     } catch (err) {
-      check('v2 七页 × 七态截图已出图', false, String(err))
+      check('v2 七页 × 七态截图已出图', false, String(err))  // 抛在生成过程中，页/态数还没算出来
     }
 
     await js(win, `['--canvas-w','--canvas-h','--scale-x','--scale-y']
@@ -1112,17 +1122,29 @@ export async function runSelftest(win: BrowserWindow, store?: Store): Promise<bo
        唯一说得过去的判据是一一对应：状态里有，屏上就得有。 */
     win.webContents.send(CH.command, { type: 'showPage', page: 'b', token: ++token })
     await sleep(320)
-    const perAgent = await js<string[]>(win, `
-      [...document.querySelectorAll('#pbBands .tile')].map(t =>
-        (t.querySelector('[data-model]')?.textContent || '').trim())`)
-    const wantModels = store.get().agents.map(a => (a.topModel ?? '').trim())
-    const bad = wantModels
-      .map((w, i) => (w && !perAgent[i] ? `${store.get().agents[i]?.id}: 状态有「${w}」屏上空` : ''))
-      .filter(Boolean)
-    check('B 页模型名：状态里有的，屏上逐家都画出来了',
+    /* REVISION 10 起模型短名在产品名旁边的 `.b-model` 里，不再是 verdict 那个 `[data-model]`。
+       规则不是「有值就一定画」：这一行有状态词（等待你批准 / 运行中）或处于 stale 时，
+       那个槽位让给更该被看到的东西，模型**故意**不显示。
+       所以逐家比的是「该画的画了、该让的让了」两个方向，而不是单纯数非空。 */
+    const perAgent = await js<Array<{ model: string; word: string }>>(win, `
+      [...document.querySelectorAll('#pbBands .tile')].map(t => ({
+        model: (t.querySelector('.b-model')?.textContent || '').replace(/^·\\s*/, '').trim(),
+        word: (t.querySelector('.b-verdict')?.textContent || '').trim()
+      }))`)
+    const agentsNow = store.get().agents
+    const bad = agentsNow.map((a, i) => {
+      const want = (a.topModel ?? '').trim()
+      const got = perAgent[i]?.model ?? ''
+      const yields = a.status === 'running' || a.status === 'attention' || !!a.stale
+      if (yields) return got ? `${a.id}: 该让位给「${perAgent[i]?.word}」却还画着「${got}」` : ''
+      if (want && !got) return `${a.id}: 状态有「${want}」屏上空`
+      if (!want && got) return `${a.id}: 状态没有模型，屏上却画了「${got}」`
+      return ''
+    }).filter(Boolean)
+    check('B 页模型名：该画的画了、该让位的让了（状态词 / stale 优先）',
       bad.length === 0,
       bad.length ? bad.join(' | ')
-        : wantModels.map((w, i) => `${store.get().agents[i]?.id}=${w || '(本窗口无活动)'}`).join(' · '))
+        : agentsNow.map((a, i) => `${a.id}=${perAgent[i]?.model || `(让位给「${perAgent[i]?.word || '无活动'}」)`}`).join(' · '))
   }
 
   /* ==========================================================================

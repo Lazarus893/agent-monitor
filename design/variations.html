@@ -370,6 +370,14 @@ accent
   --fs-attn-lead:28px;  /* attention 页「等待你」（简报底线 24）            */
   --fs-attn-body:18px;  /* attention 页说明句                               */
   --fs-num-a:    64px;  /* A 页 5h 百分比（简报底线 64）                     */
+  /* REVISION 10（用户 2026-09-15 实机反馈）：额度打满时三位数横向放不下。
+     panelX 1.19 下瓦片内宽只有 105.67px，而 64px 的「100」按 IBM Plex Mono 的
+     0.6em advance 要 115.2px —— R5-11 当时按 480 画布的 133px 内宽算，结论
+     「64px 三位数放得下」只在那一种画布上成立，403 上必溢出。
+     三位数降一档：数字 52px、% 16px（两位数不动，64px 的下限对它仍然成立）。
+     这条覆盖 brief 的「A 页数字 ≥64px」——把数字砍到放得下，比让它被裁掉好。 */
+  --fs-num-a-wide: 52px;
+  --fs-unit-a-wide:16px;
 
   /* 节奏 —— REVISION 5（用户 2026-09-14 实机反馈：原 10/6/6 s 太快）。
      三页一律 60 s，一轮 3 分钟。原来的设计假设是「靠快速回归 A 页来补偿
@@ -694,9 +702,13 @@ html[data-pure="1"] .pure-hint{position:fixed;left:50%;bottom:24px;transform:tra
 .page-a .a-body{flex:1;display:flex;flex-direction:column;justify-content:center;gap:var(--sp-md);min-width:0}
 .page-a .a-nums{display:flex;align-items:baseline;gap:2px;min-width:0}
 .page-a .a-nums .num{font-size:var(--fs-num-a)}
-/* R5-11 · 原来三位数降到 48px，低于 A 页 ≥64px 的下限，而「额度用尽」恰恰最该喊出来。
-   实测 64px 三位数约 111px < 133px 内宽，放得下——不降档，改藏掉此时冗余的 %。 */
-.page-a .a-nums[data-wide="1"] .unit{display:none}
+/* REVISION 10 · R5-11 那条（三位数不降档、改藏掉 %）作废：它按 480 画布的 133px
+   内宽算，而实机跑的是 panelX 1.19、瓦片内宽 105.67px —— 64px 的「100」要 115.2px，
+   横竖放不下，用户在实机上撞到了。现在三位数整体降一档：数字 52px、% 16px，
+   % 也不再藏起来（藏掉它省的 12px 根本不够，代价却是「100」读成一个裸数字）。
+   两位数一个像素都不动，64px 的下限对它仍然成立。 */
+.page-a .a-nums[data-wide="1"] .num{font-size:var(--fs-num-a-wide)}
+.page-a .a-nums[data-wide="1"] .unit{font-size:var(--fs-unit-a-wide)}
 .page-a .a-nums .unit{font-size:var(--fs-unit-r)}
 /* 倒计时 18px（R4-06 点名要提上来），状态词 14px —— 两者分档才在 123px 的瓦片
    内宽里放得下，也让「数字」与「说明」不再是同一个视觉层 */
@@ -729,19 +741,41 @@ html[data-pure="1"] .pure-hint{position:fixed;left:50%;bottom:24px;transform:tra
    余量归零（实测需 109px），且 inline-flex 下 text-overflow 对匿名文本项不生效——
    省略号「装了但没通电」。改 min-width:112px + 内层 span 承载省略号。 */
 .page-b .b-name{font-size:var(--fs-body-r);font-weight:var(--w-emph);color:var(--ink);
-  display:flex;align-items:center;gap:var(--sp-xs);min-width:112px;flex:none;line-height:1}
-.page-b .b-name span.t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-.page-b .b-verdict{font-size:var(--fs-min);color:var(--mute);flex:1;min-width:0;
+  display:flex;align-items:baseline;gap:var(--sp-xs);min-width:112px;flex:none;line-height:1}
+.page-b .b-name .iddot{align-self:center}
+/* 产品名不参与收缩（flex-shrink:0）：它是这一行唯一的身份标签，
+   A-2 的教训是把它省略掉就等于把身份降级成一个颜色点。要让的是模型短名。 */
+.page-b .b-name span.t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:none}
+/* REVISION 10 · 模型名不再占一整列，跟在产品名后面：`● Claude Code · Fable 5.1`。
+   同字号同基线、短名 --mute —— 它是这一行的从属信息，不是第二个字段。
+   收缩优先级：短名先让（flex-shrink 5），产品名后让（1）；两者都有省略号兜底。
+   腾出来的一整列宽度给了数字与倒计时（.b-pc 从此能定死 4 个字符宽）。 */
+.page-b .b-model{font-weight:var(--w-read);color:var(--mute);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 5 auto}
+/* ok 行没有判语列了，名字这一列顺势吃掉剩余宽度，数字列因此仍然右对齐成一条线；
+   loading / msg 行还留着判语，那里仍用 112px 的固定名字列让三条判语共享左边缘。 */
+.page-b .b-head-ok .b-name{flex:1;min-width:0}
+.page-b .b-verdict{font-size:var(--fs-min);color:var(--mute);flex:0 1 auto;min-width:0;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.2}
 .page-b .b-verdict[data-tone="error"]{color:var(--danger)}
 .page-b .b-verdict[data-tone="attn"]{color:var(--ink);font-weight:var(--w-read)}
 .page-b .b-alert{display:inline-flex;align-items:center;flex:none;color:var(--quota-warn)}
 .page-b [data-level="danger"] .b-alert{color:var(--quota-danger)}
-.page-b .b-pc{font-size:var(--fs-num-b);font-weight:var(--w-emph);color:var(--ink);flex:none}
+/* REVISION 10 · 数字列定死 4 个字符宽（mono + tabular，20px 下 4ch = 48px）：
+   「100%」与「7%」占同一格，打满时不会把倒计时与 7d 往外挤，
+   三行的百分数也因此对齐成一列——原来它是变宽的，三行数字各在各的位置上。 */
+.page-b .b-pc{font-size:var(--fs-num-b);font-weight:var(--w-emph);color:var(--ink);
+  flex:none;width:4ch;min-width:0;text-align:right}
 .page-b [data-level="warn"]   .b-pc{color:var(--quota-warn)}
 .page-b [data-level="danger"] .b-pc{color:var(--quota-danger)}
-.page-b .b-sec{font-size:var(--fs-body-r);color:var(--mute);flex:none}
-.page-b .b-cd{font-size:var(--fs-min);color:var(--mute);flex:none;width:48px;text-align:right;
+/* 7d 那一格同理定宽：7 个字符（「7d 100%」）—— 变宽的话打满时会顶到倒计时上。
+   字号同时从 16px 降到 14px：5h 是这一页的主角（20px），7d 是参考值，
+   两者原来只差 4px，读起来是同一层；降档既让层级清楚，也把 8.4px 还给了模型短名。 */
+.page-b .b-sec{font-size:var(--fs-min);color:var(--mute);flex:none;
+  width:7ch;min-width:0;text-align:right}
+/* 倒计时同样定宽，但按字符数定：5 个字符（「4h59m」）在 14px mono 下正好 42px，
+   原来的 48px 是按像素估的，多出来的 6px 在 403 画布上买不起。 */
+.page-b .b-cd{font-size:var(--fs-min);color:var(--mute);flex:none;width:5ch;text-align:right;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* B-1 · 轨道原来是 --ash 实心板：全屏最亮的一块，承载的却是「没用掉的部分」——
    figure/ground 反过来了（0% 的那条读成「满的」）。WCAG 1.4.11 要的是组件边界
@@ -1008,6 +1042,7 @@ html[data-rm="1"] .page{transform:none!important}
       <button type="button" data-s="empty"     aria-pressed="false">empty</button>
       <button type="button" data-s="error"     aria-pressed="false">error</button>
       <button type="button" data-s="edge"      aria-pressed="false">edge</button>
+      <button type="button" data-s="full"      aria-pressed="false">full</button>
       <button type="button" data-s="attention" aria-pressed="false">attention</button>
       <button type="button" data-s="running"   aria-pressed="false">running</button>
     </div>
@@ -2554,6 +2589,15 @@ const SCENES = {
         {label:"5h", usedPercent:82, resetsAt:CLAUDE_OK[0].resetsAt}, CLAUDE_OK[1]]},
       {agent:"zcode", phase:"ok", status:"idle", windows:ZCODE_OK}],
     feed:{phase:"ok", items:EDGE_FEED.map(x => ({...x}))}}),
+  /* full · 三家同时 100%、7d 也 100%（用户 2026-09-15 实机反馈：额度打满时横向放不下）。
+     这是 edge 里最宽的那一种，但不能拿它替掉 edge —— edge 现在的 97 / 82 / 61 正好
+     覆盖 danger / warn / ok 三档，而 full 三条都是 danger。两个场景各管一件事：
+     edge 管「三档同屏还读不读得出层级」，full 管「最宽的数字还放不放得下」。 */
+  full: () => ({tiles:["codex","claude","zcode"].map(a => ({
+      agent:a, phase:"ok", status:"idle", windows:[
+        {label:"5h", usedPercent:100, resetsAt:QUOTA[a].windows[0].resetsAt},
+        {label:"7d", usedPercent:100}]})),
+    feed:{phase:"ok", items:BASE_FEED.map(x => ({...x}))}}),
   attention: () => ({tiles:[
       {agent:"codex",  phase:"ok", status:"idle", windows:CODEX_OK},
       {agent:"claude", phase:"ok", status:"attention", windows:CLAUDE_OK},
@@ -2661,19 +2705,32 @@ function renderPageA(){
    Codex / Claude 的会话记录里没有模型名字段，先用简报给的例子占位，M1 接真实数据。
    字体用 sans（Inter）而不是 mono：模型名是专名不是数字，混合大小写在 Inter 下
    字形区分更好，mono 会把 "Fable 5.1" 里的字母也拉成等宽，读起来像代码。 */
-/* 三个值现在都有真实出处（m3-executor 在本机取到）：Codex 从 turn_context.payload.model、
-   ZCode 从 tasks 表、Claude 从 ~/.claude/projects 递归统计 assistant 行的 message.model
-   （子 agent 的记录在更深两层，只扫平铺目录会漏掉大半）。原型没有模型 fixture，
-   所以写死本机实测值而不是简报的举例值——显示一个已知为假的名字比显示静态真值更糟。 */
-const TOP_MODEL = {codex:"gpt-6-astra", claude:"Opus 5", zcode:"GLM-5.3-Flash"};
-const topModel = id => TOP_MODEL[id] || "—";
+/* REVISION 10（用户 2026-09-15）：模型名跟在产品名后面，fixtures 先按**短名**写。
+   短名不是「把实测值截断」，是模型的通用叫法：gpt-6-astra → Astra、
+   GLM-5.3-Flash → GLM-5.3。约束写进断言：≤10 字符——再长就会把产品名挤掉，
+   而这一行里产品名是主、模型是从。数据层拿到长名后同样只显示短名。
+   （上一版写死的是本机实测长名，理由是「显示一个已知为假的名字比显示静态真值更糟」；
+   短名仍是真名的一部分，不是编的，这条理由不受影响。） */
+const TOP_MODEL = {codex:"Astra", claude:"Fable 5.1", zcode:"GLM-5.3"};
+const topModel = id => TOP_MODEL[id] || "";
 
 /* ---------- 渲染：B 页 ---------- */
 function renderPageB(){
   el.pbBands.innerHTML = scene.tiles.map(t => {
     const a = AGENTS[t.agent];
     const lv = t.phase === "ok" ? level(t.windows[0].usedPercent) : "ok";
-    const nameCell = `<h2 class="b-name"><span class="iddot"${t.phase === "ok" ? "" : ' data-off="1"'}></span><span class="t">${esc(a.name)}</span></h2>`;
+    /* REVISION 10 · 模型短名跟在产品名后面。三条规则：
+       ① 没有模型数据时连「·」都不出现（分隔符是关系，不是装饰）；
+       ② 有状态词（等待你批准 / 运行中）时不显示模型——一行只带一个从属信息，
+          而状态词永远比「用得最多的模型」更该被看到；
+       ③ warn / danger 时也不显示——那一格让给警示图标与三位数。实测 403 画布上
+          「Claude Code · Fable 5.1」+ 图标 + 100% + 7d 100% + 倒计时要 183+22+…，
+          放不下就会**两个都被省略**（「Claude Co… · Fabl…」），那是最差的结果：
+          额度吃紧的时候该读的是额度，不是模型。 */
+    const word = t.status === "attention" ? "等待你批准" : t.status === "running" ? "运行中" : "";
+    const model = (word || lv !== "ok") ? "" : topModel(t.agent);
+    const nameCell = `<h2 class="b-name"><span class="iddot"${t.phase === "ok" ? "" : ' data-off="1"'}></span>` +
+      `<span class="t">${esc(a.name)}</span>${model ? `<span class="b-model">· ${esc(model)}</span>` : ""}</h2>`;
     let inner;
     if (t.phase === "loading")
       inner = `<div class="b-head">${nameCell}<span class="b-verdict"><span class="loading-label sr" role="status">读取中</span></span></div>
@@ -2689,8 +2746,8 @@ function renderPageB(){
     else {
       const w5 = t.windows[0], w7 = t.windows[1];
       const start = new Date(w5.resetsAt).getTime() - WIN5H;
-      inner = `<div class="b-head">${nameCell}
-        <span class="b-verdict" data-model="${esc(topModel(t.agent))}" data-status="${t.status}"></span>
+      inner = `<div class="b-head b-head-ok">${nameCell}
+        ${word ? `<span class="b-verdict" data-tone="${t.status === "attention" ? "attn" : "mute"}">${esc(word)}</span>` : ""}
         ${lv === "ok" ? "" : `<span class="b-alert" aria-label="${lv === "danger" ? "余量吃紧" : "余量偏紧"}">${svg("alert",14)}</span>`}
         <span class="b-pc mono">${w5.usedPercent}%</span>
         ${w7 ? `<span class="b-sec mono">${esc(w7.label)} ${w7.usedPercent}%</span>` : ""}
@@ -2999,15 +3056,10 @@ function tickTiles(){
     const pct = Math.max(0, Math.min(100, ((t - Number(n.dataset.caret)) / WIN5H) * 100));
     n.style.left = pct.toFixed(2) + "%";
   });
-  /* v2 · 判语整句删掉，原位置改显示当前窗口用得最多的模型名。
-     「够不够撑到重置」不丢：它由时间带上填充与「现在」游标的落差承担，
-     不再用一句话复述——那句话在 14px 上本来也只是被扫过去而不是被读。 */
-  document.querySelectorAll("[data-model]").forEach(n => {
-    const st = n.dataset.status;
-    if (st === "attention"){ n.dataset.tone = "attn"; n.textContent = "等待你批准"; return; }
-    n.dataset.tone = "model";
-    n.textContent = st === "running" ? `运行中 · ${n.dataset.model}` : n.dataset.model;
-  });
+  /* v2 · 判语整句删掉，原位置改显示当前窗口用得最多的模型名（REVISION 10 之后
+     模型名跟在产品名后面，状态词由 renderPageB 直接渲染）。「够不够撑到重置」仍由
+     时间带上填充与「现在」游标的落差承担，不用一句话复述。
+     原来挂在这里每秒重写一次 B 页判语列的 ticker 一并删掉：它写的两样东西都不随秒变。 */
 }
 function tickFeed(){
   const t = now();

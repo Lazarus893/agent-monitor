@@ -141,14 +141,20 @@ async function tail(path: string, bytes = TAIL_BYTES): Promise<string> {
 export async function claudeTopModel(
   dir = PROJECTS_DIR,
   windowMs = WINDOW_MS,
-  now = Date.now()
+  now = Date.now(),
+  /* 怎么把 id 变成屏上那几个字。默认 `displayName`（`Fable 5.1`）；
+     B 页传 `shortModel`（brief-m0-v2 §10 起那一格是「产品名 · 模型」）。
+     传进来而不是在外面再转一道：statusline 兜底那条路返回的已经是显示名，
+     外面再套一层就会对一个**已经格式化过的**字符串再解析一次。 */
+  format: (raw: string) => string | undefined = displayName
 ): Promise<string | undefined> {
   const counts = new Map<string, number>()
   for (const f of await recentTranscripts(dir, windowMs, now)) {
     countModels(await tail(f), counts)
   }
   const top = topOf(counts)
-  if (top) return displayName(top)
+  if (top) return format(top)
+  // statusline 给的是 display_name（`Fable 5.1`），不是 id —— 它已经是给人看的了
   return statuslineModel()
 }
 
@@ -174,4 +180,60 @@ export async function statuslineModel(file = STATUSLINE_FILE): Promise<string | 
 export function plainName(raw: string | undefined): string | undefined {
   if (!raw) return undefined
   return raw.length <= NAME_MAX ? raw : raw.slice(0, NAME_MAX - 1) + '…'
+}
+
+/* ==========================================================================
+   短名（brief-m0-v2 §10）。B 页那一格是「产品名 · 模型」，模型那半只有几个字符，
+   放的必须是**认得出是哪个模型**的最短形式，而不是把完整 id 截断 ——
+   `GLM-5.3-Fl…` 与 `gpt-6-astr…` 都是「截断」，不是「短名」。
+
+   本机实测出现过的 id（三处采集当场抓的，用例就用这些）：
+     Claude  claude-fable-5-1 / claude-opus-5 / claude-opus-4-6 / opus / <synthetic>
+     Codex   gpt-6-astra / gpt-5.6-sol
+     ZCode   builtin:bigmodel-coding-plan/GLM-5.3-Flash / …/GLM-5.3$high / …/GLM-5.2
+   ========================================================================== */
+
+/** 未知形态的上限（简报：最长 10 字符） */
+export const SHORT_MAX = 10
+
+const cap = (s: string): string => (s ? s[0]!.toUpperCase() + s.slice(1) : s)
+const clipShort = (s: string): string =>
+  s.length <= SHORT_MAX ? s : s.slice(0, SHORT_MAX - 1) + '…'
+
+/**
+ * 模型 id → 紧跟在产品名后面的短名。
+ *
+ * 四条家族规则，其余走兜底。**故意不做成一张查找表**：表只认见过的那几个，
+ * 而模型每隔几周就出新的，认不出的那天屏上就会退回一串截断的 id。
+ * 规则认的是**构词法**，新版本号、新代号都自动接得住。
+ */
+export function shortModel(raw: string | undefined): string | undefined {
+  if (!raw) return undefined
+  // `builtin:bigmodel-coding-plan/GLM-5.3$high` → `GLM-5.3`：去供应商路径与 $档位
+  const bare = (raw.split('/').pop() ?? '').split('$')[0]!.trim()
+  if (!bare) return undefined
+
+  // Claude：claude-<名>-<版本各段> → `Fable 5.1` / `Opus 5` / `Haiku 4.5`
+  const cl = /^claude-([a-z]+)((?:-\d+)*)$/i.exec(bare)
+  if (cl) {
+    const ver = cl[2]!.split('-').filter(Boolean).join('.')
+    return ver ? `${cap(cl[1]!)} ${ver}` : cap(cl[1]!)
+  }
+  // 裸的家族名（转录里出现过 `opus`）
+  if (/^(opus|sonnet|haiku|fable)$/i.test(bare)) return cap(bare)
+
+  // Codex：gpt-<版本>-<代号> → 代号本身就是产品名（Astra / Sol）；没有代号就 `GPT-<版本>`
+  const gp = /^gpt-([\d.]+)(?:-([a-z][a-z\d]*))?$/i.exec(bare)
+  if (gp) return gp[2] ? cap(gp[2]) : `GPT-${gp[1]}`
+
+  // 智谱：GLM-<主>.<次>，后面的档位词（Flash / Air…）不进短名
+  const glm = /^(GLM-[\d.]+)/i.exec(bare)
+  if (glm) return glm[1]!.toUpperCase().replace('GLM', 'GLM')
+
+  /* 兜底：去掉厂商前缀（第一个 `-` 之前那段，只有它像厂商名时才去），
+     取最后一段、首字母大写、截到 10 字符。
+     `<synthetic>` 这种尖括号占位也走这里，原样留着比猜一个名字诚实。 */
+  const parts = bare.split('-').filter(Boolean)
+  const last = parts.length > 1 ? parts[parts.length - 1]! : bare
+  return clipShort(cap(last))
 }

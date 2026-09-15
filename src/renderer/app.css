@@ -175,9 +175,13 @@ body{margin:0;background:var(--canvas);overflow:hidden;
 .page-a .a-body{flex:1;display:flex;flex-direction:column;justify-content:center;gap:var(--sp-md);min-width:0}
 .page-a .a-nums{display:flex;align-items:baseline;gap:2px;min-width:0}
 .page-a .a-nums .num{font-size:var(--fs-num-a)}
-/* R5-11 · 原来三位数降到 48px，低于 A 页 ≥64px 的下限，而「额度用尽」恰恰最该喊出来。
-   实测 64px 三位数约 111px < 133px 内宽，放得下——不降档，改藏掉此时冗余的 %。 */
-.page-a .a-nums[data-wide="1"] .unit{display:none}
+/* REVISION 10 · R5-11 那条（三位数不降档、改藏掉 %）作废：它按 480 画布的 133px
+   内宽算，而实机跑的是 panelX 1.19、瓦片内宽 105.67px —— 64px 的「100」要 115.2px，
+   横竖放不下，用户在实机上撞到了。现在三位数整体降一档：数字 52px、% 16px，
+   % 也不再藏起来（藏掉它省的 12px 根本不够，代价却是「100」读成一个裸数字）。
+   两位数一个像素都不动，64px 的下限对它仍然成立。 */
+.page-a .a-nums[data-wide="1"] .num{font-size:var(--fs-num-a-wide)}
+.page-a .a-nums[data-wide="1"] .unit{font-size:var(--fs-unit-a-wide)}
 .page-a .a-nums .unit{font-size:var(--fs-unit-r)}
 /* 倒计时 18px（R4-06 点名要提上来），状态词 14px —— 两者分档才在 123px 的瓦片
    内宽里放得下，也让「数字」与「说明」不再是同一个视觉层 */
@@ -210,19 +214,41 @@ body{margin:0;background:var(--canvas);overflow:hidden;
    余量归零（实测需 109px），且 inline-flex 下 text-overflow 对匿名文本项不生效——
    省略号「装了但没通电」。改 min-width:112px + 内层 span 承载省略号。 */
 .page-b .b-name{font-size:var(--fs-body-r);font-weight:var(--w-emph);color:var(--ink);
-  display:flex;align-items:center;gap:var(--sp-xs);min-width:112px;flex:none;line-height:1}
-.page-b .b-name span.t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-.page-b .b-verdict{font-size:var(--fs-min);color:var(--mute);flex:1;min-width:0;
+  display:flex;align-items:baseline;gap:var(--sp-xs);min-width:112px;flex:none;line-height:1}
+.page-b .b-name .iddot{align-self:center}
+/* 产品名不参与收缩（flex-shrink:0）：它是这一行唯一的身份标签，
+   A-2 的教训是把它省略掉就等于把身份降级成一个颜色点。要让的是模型短名。 */
+.page-b .b-name span.t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:none}
+/* REVISION 10 · 模型名不再占一整列，跟在产品名后面：`● Claude Code · Fable 5.1`。
+   同字号同基线、短名 --mute —— 它是这一行的从属信息，不是第二个字段。
+   收缩优先级：短名先让（flex-shrink 5），产品名后让（1）；两者都有省略号兜底。
+   腾出来的一整列宽度给了数字与倒计时（.b-pc 从此能定死 4 个字符宽）。 */
+.page-b .b-model{font-weight:var(--w-read);color:var(--mute);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 5 auto}
+/* ok 行没有判语列了，名字这一列顺势吃掉剩余宽度，数字列因此仍然右对齐成一条线；
+   loading / msg 行还留着判语，那里仍用 112px 的固定名字列让三条判语共享左边缘。 */
+.page-b .b-head-ok .b-name{flex:1;min-width:0}
+.page-b .b-verdict{font-size:var(--fs-min);color:var(--mute);flex:0 1 auto;min-width:0;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.2}
 .page-b .b-verdict[data-tone="error"]{color:var(--danger)}
 .page-b .b-verdict[data-tone="attn"]{color:var(--ink);font-weight:var(--w-read)}
 .page-b .b-alert{display:inline-flex;align-items:center;flex:none;color:var(--quota-warn)}
 .page-b [data-level="danger"] .b-alert{color:var(--quota-danger)}
-.page-b .b-pc{font-size:var(--fs-num-b);font-weight:var(--w-emph);color:var(--ink);flex:none}
+/* REVISION 10 · 数字列定死 4 个字符宽（mono + tabular，20px 下 4ch = 48px）：
+   「100%」与「7%」占同一格，打满时不会把倒计时与 7d 往外挤，
+   三行的百分数也因此对齐成一列——原来它是变宽的，三行数字各在各的位置上。 */
+.page-b .b-pc{font-size:var(--fs-num-b);font-weight:var(--w-emph);color:var(--ink);
+  flex:none;width:4ch;min-width:0;text-align:right}
 .page-b [data-level="warn"]   .b-pc{color:var(--quota-warn)}
 .page-b [data-level="danger"] .b-pc{color:var(--quota-danger)}
-.page-b .b-sec{font-size:var(--fs-body-r);color:var(--mute);flex:none}
-.page-b .b-cd{font-size:var(--fs-min);color:var(--mute);flex:none;width:48px;text-align:right;
+/* 7d 那一格同理定宽：7 个字符（「7d 100%」）—— 变宽的话打满时会顶到倒计时上。
+   字号同时从 16px 降到 14px：5h 是这一页的主角（20px），7d 是参考值，
+   两者原来只差 4px，读起来是同一层；降档既让层级清楚，也把 8.4px 还给了模型短名。 */
+.page-b .b-sec{font-size:var(--fs-min);color:var(--mute);flex:none;
+  width:7ch;min-width:0;text-align:right}
+/* 倒计时同样定宽，但按字符数定：5 个字符（「4h59m」）在 14px mono 下正好 42px，
+   原来的 48px 是按像素估的，多出来的 6px 在 403 画布上买不起。 */
+.page-b .b-cd{font-size:var(--fs-min);color:var(--mute);flex:none;width:5ch;text-align:right;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* B-1 · 轨道原来是 --ash 实心板：全屏最亮的一块，承载的却是「没用掉的部分」——
    figure/ground 反过来了（0% 的那条读成「满的」）。WCAG 1.4.11 要的是组件边界
