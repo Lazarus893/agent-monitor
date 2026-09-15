@@ -754,7 +754,10 @@ html[data-pure="1"] .pure-hint{position:fixed;left:50%;bottom:24px;transform:tra
   overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 5 auto}
 /* ok 行没有判语列了，名字这一列顺势吃掉剩余宽度，数字列因此仍然右对齐成一条线；
    loading / msg 行还留着判语，那里仍用 112px 的固定名字列让三条判语共享左边缘。 */
-.page-b .b-head-ok .b-name{flex:1;min-width:0}
+/* flex 基数用 auto 而不是 0%：basis 0 时名字列的大小完全由「剩多少」决定，
+   一旦某一行的数字列变宽（7 字符倒计时）就会连产品名一起挤掉，而右边其实还空着；
+   basis auto 是「先按内容量，放不下再让」，与实际的优先级一致。 */
+.page-b .b-head-ok .b-name{flex:1 1 auto;min-width:0}
 .page-b .b-verdict{font-size:var(--fs-min);color:var(--mute);flex:0 1 auto;min-width:0;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.2}
 .page-b .b-verdict[data-tone="error"]{color:var(--danger)}
@@ -773,9 +776,11 @@ html[data-pure="1"] .pure-hint{position:fixed;left:50%;bottom:24px;transform:tra
    两者原来只差 4px，读起来是同一层；降档既让层级清楚，也把 8.4px 还给了模型短名。 */
 .page-b .b-sec{font-size:var(--fs-min);color:var(--mute);flex:none;
   width:7ch;min-width:0;text-align:right}
-/* 倒计时同样定宽，但按字符数定：5 个字符（「4h59m」）在 14px mono 下正好 42px，
-   原来的 48px 是按像素估的，多出来的 6px 在 403 画布上买不起。 */
-.page-b .b-cd{font-size:var(--fs-min);color:var(--mute);flex:none;width:5ch;text-align:right;
+/* 倒计时按字符数定，但定的是**下限**不是定宽（REVISION 10b）：
+   5 个字符（「4h59m」）是常态，42px 让三行的倒计时对齐；可周额度重置时它会长到
+   7 个字符（「107h55m」），定宽就会把它自己省略掉——倒计时是必须完整出现的字段，
+   不是可以让的那一个。flex:none 保证它只从名字列那边要地方，不被名字挤压。 */
+.page-b .b-cd{font-size:var(--fs-min);color:var(--mute);flex:none;min-width:5ch;text-align:right;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* B-1 · 轨道原来是 --ash 实心板：全屏最亮的一块，承载的却是「没用掉的部分」——
    figure/ground 反过来了（0% 的那条读成「满的」）。WCAG 1.4.11 要的是组件边界
@@ -2585,9 +2590,19 @@ const SCENES = {
   edge: () => ({tiles:[
       {agent:"codex", phase:"ok", status:"idle", windows:[
         {label:"5h", usedPercent:97, resetsAt:"2026-09-14T16:35:48+08:00"}, CODEX_OK[1]]},
+      /* REVISION 10b · m4-executor 在真机上见过一帧「Claude Co… · Fabl…」双双截断、
+         右侧却留着空——那一行是 7 字符的倒计时（107h55m）且 7d 块缺席。
+         原型里复现这一帧：**最长的产品名 + 最长的短名 + 最长的倒计时 + 没有 7d**。
+         两件事都会真的发生：7d 是 API 给的，缺了就不渲染；「107h55m」是周额度
+         那种重置周期在倒计时里的真实形态。
+         这一行必须落在 ok 档（61%）——warn / danger 时短名本来就不显示（REVISION 10），
+         那样就复现不出「产品名与短名并排」这个最宽的组合。
+         warn 这一档挪给 ZCode，edge 仍然是 danger / ok / warn 三档同屏。 */
       {agent:"claude", phase:"ok", status:"idle", windows:[
-        {label:"5h", usedPercent:82, resetsAt:CLAUDE_OK[0].resetsAt}, CLAUDE_OK[1]]},
-      {agent:"zcode", phase:"ok", status:"idle", windows:ZCODE_OK}],
+        {label:"5h", usedPercent:61,
+         resetsAt:new Date(NOW0 + (107 * 60 + 55) * 60000).toISOString()}]},
+      {agent:"zcode", phase:"ok", status:"idle", windows:[
+        {label:"5h", usedPercent:82, resetsAt:ZCODE_OK[0].resetsAt}, ZCODE_OK[1]]}],
     feed:{phase:"ok", items:EDGE_FEED.map(x => ({...x}))}}),
   /* full · 三家同时 100%、7d 也 100%（用户 2026-09-15 实机反馈：额度打满时横向放不下）。
      这是 edge 里最宽的那一种，但不能拿它替掉 edge —— edge 现在的 97 / 82 / 61 正好

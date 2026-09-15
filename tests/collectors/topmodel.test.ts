@@ -166,6 +166,31 @@ describe('shortModel · 实测 id', () => {
       expect(shortModel(id)!.length).toBeLessThanOrEqual(SHORT_MAX)
     }
   })
+
+  /* 长度是这个函数自己的契约，不能只靠 B 页那条渲染断言兜 ——
+     那条要在「产品名最长的一行 + ok 档 + 403 画布」同时成立时才会红，条件太窄。
+     构词法的输出长度是开放的：新家族名、长代号、长版本链都可能超。 */
+  it('**任何**输入的输出都 ≤10 —— 构词法不给长度做保证，这里给', () => {
+    const ids = [
+      // 实测过的
+      'claude-fable-5-1', 'claude-opus-5', 'claude-opus-4-6', 'opus', '<synthetic>',
+      'gpt-6-astra', 'gpt-5.6-sol',
+      'builtin:bigmodel-coding-plan/GLM-5.3-Flash', 'builtin:bigmodel-coding-plan/GLM-5.3$high',
+      // 构造的长形态：每一条都走不同的分支
+      'claude-somelongfamilyname-5',              // Claude 分支：长家族名
+      'claude-sonnet-4-5-20250929',               // Claude 分支：长版本链
+      'gpt-7-averyverylongcodename',              // Codex 分支：长代号
+      'gpt-12.34.56.78',                          // Codex 分支：长版本
+      'GLM-5.3.4.5.6.7.8.9-Flash',                // 智谱分支：长版本
+      'builtin:plan/some-vendor-averylongtailsegment',  // 兜底分支
+      'averylongsinglewordmodelname'              // 兜底分支：没有连字符
+    ]
+    for (const id of ids) {
+      const out = shortModel(id)
+      expect(out, id).toBeDefined()
+      expect(out!.length, `${id} → ${out}`).toBeLessThanOrEqual(SHORT_MAX)
+    }
+  })
 })
 
 describe('shortModel · 兜底', () => {

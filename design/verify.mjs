@@ -325,6 +325,13 @@ for (const cv of CANVASES) {
       // 4m · REVISION 10 · B 页模型短名：≤10 字符；没有模型数据时不出现「·」。
       const modelBad = [];
       if (live && live.dataset.p === 'b') {
+        /* REVISION 10b · 真机上出现过「Claude Co… · Fabl…」双双截断而右侧留空的一帧
+           （7 字符倒计时 107h55m + 7d 缺席）。产品名与倒计时都是必须完整出现的字段：
+           前者是这一行唯一的身份标签，后者是「还有多久」本身。任何一个被省略都是错。 */
+        for (const t of live.querySelectorAll('.b-name span.t'))
+          if (t.scrollWidth > t.clientWidth + 1) modelBad.push(`产品名被截断：${t.textContent}`);
+        for (const c of live.querySelectorAll('.b-cd'))
+          if (c.scrollWidth > c.clientWidth + 1) modelBad.push(`倒计时被截断：${c.textContent}`);
         for (const h of live.querySelectorAll('.b-head')) {
           const m = h.querySelector('.b-model');
           if (!m) continue;
@@ -334,8 +341,8 @@ for (const cv of CANVASES) {
           /* 与 E-1 同一套口径：允许省略，不允许省略到读不出是哪个模型。
              阈值 60% —— 打满 + 警示图标那一屏（full）宽度最紧，短名会让掉一截，
              那是对的取舍（那一屏该被读的是额度不是模型），但不能让到只剩前缀。 */
-          if (m.clientWidth < m.scrollWidth * 0.6)
-            modelBad.push(`模型短名省略过半：${txt}（${m.clientWidth}/${m.scrollWidth}）`);
+          if (m.scrollWidth > m.clientWidth + 1)
+            modelBad.push(`模型短名被省略：${txt}（${m.clientWidth}/${m.scrollWidth}）`);
         }
       }
 
@@ -467,6 +474,11 @@ for (const px of [1.00, 1.19]) {
     await assertClean(`${name}${sfx}`);
     await page.locator('#stage').screenshot({ path: `${SHOTS}/${name}${sfx}.png` });
   }
+  // REVISION 10b · edge 里那一帧要留图：Claude 行 = 最长产品名 + 最长短名 + 7 字符倒计时 + 无 7d
+  await page.click('#segState button[data-s="edge"]');
+  await page.click('#segPage button[data-p="b"]'); await page.waitForTimeout(380);
+  await assertClean(`page-b-edge${sfx}`);
+  await page.locator('#stage').screenshot({ path: `${SHOTS}/page-b-edge${sfx}.png` });
   // REVISION 10 · 额度打满那一屏也要留图：A 页三位数降档、B 页 100% 与 7d 100% 并排
   await page.click('#segState button[data-s="full"]');
   for (const [p, name] of [['a','page-a-full'],['b','page-b-full']]) {

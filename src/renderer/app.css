@@ -227,7 +227,10 @@ body{margin:0;background:var(--canvas);overflow:hidden;
   overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 5 auto}
 /* ok 行没有判语列了，名字这一列顺势吃掉剩余宽度，数字列因此仍然右对齐成一条线；
    loading / msg 行还留着判语，那里仍用 112px 的固定名字列让三条判语共享左边缘。 */
-.page-b .b-head-ok .b-name{flex:1;min-width:0}
+/* flex 基数用 auto 而不是 0%：basis 0 时名字列的大小完全由「剩多少」决定，
+   一旦某一行的数字列变宽（7 字符倒计时）就会连产品名一起挤掉，而右边其实还空着；
+   basis auto 是「先按内容量，放不下再让」，与实际的优先级一致。 */
+.page-b .b-head-ok .b-name{flex:1 1 auto;min-width:0}
 .page-b .b-verdict{font-size:var(--fs-min);color:var(--mute);flex:0 1 auto;min-width:0;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.2}
 .page-b .b-verdict[data-tone="error"]{color:var(--danger)}
@@ -246,9 +249,11 @@ body{margin:0;background:var(--canvas);overflow:hidden;
    两者原来只差 4px，读起来是同一层；降档既让层级清楚，也把 8.4px 还给了模型短名。 */
 .page-b .b-sec{font-size:var(--fs-min);color:var(--mute);flex:none;
   width:7ch;min-width:0;text-align:right}
-/* 倒计时同样定宽，但按字符数定：5 个字符（「4h59m」）在 14px mono 下正好 42px，
-   原来的 48px 是按像素估的，多出来的 6px 在 403 画布上买不起。 */
-.page-b .b-cd{font-size:var(--fs-min);color:var(--mute);flex:none;width:5ch;text-align:right;
+/* 倒计时按字符数定，但定的是**下限**不是定宽（REVISION 10b）：
+   5 个字符（「4h59m」）是常态，42px 让三行的倒计时对齐；可周额度重置时它会长到
+   7 个字符（「107h55m」），定宽就会把它自己省略掉——倒计时是必须完整出现的字段，
+   不是可以让的那一个。flex:none 保证它只从名字列那边要地方，不被名字挤压。 */
+.page-b .b-cd{font-size:var(--fs-min);color:var(--mute);flex:none;min-width:5ch;text-align:right;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* B-1 · 轨道原来是 --ash 实心板：全屏最亮的一块，承载的却是「没用掉的部分」——
    figure/ground 反过来了（0% 的那条读成「满的」）。WCAG 1.4.11 要的是组件边界

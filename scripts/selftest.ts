@@ -1126,25 +1126,55 @@ export async function runSelftest(win: BrowserWindow, store?: Store): Promise<bo
        规则不是「有值就一定画」：这一行有状态词（等待你批准 / 运行中）或处于 stale 时，
        那个槽位让给更该被看到的东西，模型**故意**不显示。
        所以逐家比的是「该画的画了、该让的让了」两个方向，而不是单纯数非空。 */
-    const perAgent = await js<Array<{ model: string; word: string }>>(win, `
+    const perAgent = await js<Array<{ model: string; word: string; level: string }>>(win, `
       [...document.querySelectorAll('#pbBands .tile')].map(t => ({
         model: (t.querySelector('.b-model')?.textContent || '').replace(/^·\\s*/, '').trim(),
-        word: (t.querySelector('.b-verdict')?.textContent || '').trim()
+        word: (t.querySelector('.b-verdict')?.textContent || '').trim(),
+        // 档位直接读渲染出来的 data-level，别在用例里重抄一遍 80/95 的阈值
+        level: t.dataset.level || ''
       }))`)
     const agentsNow = store.get().agents
     const bad = agentsNow.map((a, i) => {
       const want = (a.topModel ?? '').trim()
       const got = perAgent[i]?.model ?? ''
-      const yields = a.status === 'running' || a.status === 'attention' || !!a.stale
-      if (yields) return got ? `${a.id}: 该让位给「${perAgent[i]?.word}」却还画着「${got}」` : ''
+      /* 四条让位规则（REVISION 10）：有状态词、warn / danger 档、stale。
+         档位读的是瓦片上渲染出来的 data-level —— 阈值只有一处真源。 */
+      const lvl = perAgent[i]?.level ?? ''
+      const yields = a.status === 'running' || a.status === 'attention' || !!a.stale ||
+        (lvl !== '' && lvl !== 'ok')
+      if (yields) {
+        const why = a.status === 'running' || a.status === 'attention' ? `「${perAgent[i]?.word}」`
+          : a.stale ? 'stale' : `${lvl} 档`
+        return got ? `${a.id}: 该让位给 ${why} 却还画着「${got}」` : ''
+      }
       if (want && !got) return `${a.id}: 状态有「${want}」屏上空`
       if (!want && got) return `${a.id}: 状态没有模型，屏上却画了「${got}」`
       return ''
     }).filter(Boolean)
+    /* 这三个字段**一个都不许被省略**（m5-designer 2026-09-15 收紧）。
+       原来只对模型短名要求「省略不得过半」，而实机那一帧是产品名与短名双双截断、
+       右边还空着一大片 —— 根因是 `.b-name` 的 flex-basis 0 让名字列完全由「剩多少」
+       决定，而 `.b-cd` 定宽先把地方拿走了。两处 CSS 改完之后这条强度买得起：
+       224 格全过。判据用 scrollWidth 与 clientWidth，比看有没有「…」可靠
+       （ellipsis 是画出来的，不在 textContent 里）。 */
+    const clipped = await js<string[]>(win, `
+      [...document.querySelectorAll('#pbBands .b-name span.t, #pbBands .b-cd, #pbBands .b-model')]
+        .filter(n => n.scrollWidth > n.clientWidth + 1)
+        .map(n => (n.className || n.tagName) + '「' + (n.textContent || '').trim() + '」')`)
+    check('B 页：产品名 / 倒计时 / 模型短名一个都没被省略',
+      clipped.length === 0,
+      clipped.length ? clipped.join(' | ') : '三类字段全部完整')
+
     check('B 页模型名：该画的画了、该让位的让了（状态词 / stale 优先）',
       bad.length === 0,
       bad.length ? bad.join(' | ')
-        : agentsNow.map((a, i) => `${a.id}=${perAgent[i]?.model || `(让位给「${perAgent[i]?.word || '无活动'}」)`}`).join(' · '))
+        : agentsNow.map((a, i) => {
+          const m = perAgent[i]?.model
+          if (m) return `${a.id}=${m}`
+          const lvl = perAgent[i]?.level ?? ''
+          const why = perAgent[i]?.word || (lvl && lvl !== 'ok' ? `${lvl} 档` : '无活动')
+          return `${a.id}=(让位给「${why}」)`
+        }).join(' · '))
   }
 
   /* ==========================================================================
@@ -1356,15 +1386,21 @@ export async function runSelftest(win: BrowserWindow, store?: Store): Promise<bo
      放在最后：这一格会把 claude 的额度换成合成值，不能污染上面那批交付截图。
      ========================================================================== */
   if (store) {
-    store.applyQuota('claude', {
+    /* 每次读之前都重推一遍这份合成额度。
+       claude 的真实采集在有会话时**每秒都在落地**（statusline tee 一秒写一次文件），
+       只推一次的话，读完 A 页、翻到 B 页这中间就会被真数据顶掉 ——
+       实测红过一次：A 读到合成的 0%/「—」，B 读到真实的 8%/2h39m。 */
+    const pushSynthetic = (): void => store.applyQuota('claude', {
       ok: true,
       windows: [
         { label: '5h', usedPercent: 0, resetsAt: '' },
         { label: '7d', usedPercent: 10, resetsAt: new Date(Date.now() + 107 * 3600_000).toISOString() }
       ]
     })
+    pushSynthetic()
     await sleep(300)
     await sendCommand(win, { type: 'showPage', page: 'a' })
+    pushSynthetic()
     await sleep(260)
     const a = await js<{ num: string; cd: string }>(win, `(() => {
       const t = document.querySelectorAll('#paTiles .tile')[1]
@@ -1372,6 +1408,7 @@ export async function runSelftest(win: BrowserWindow, store?: Store): Promise<bo
                cd: t?.querySelector('.cd')?.textContent?.trim() || '' }
     })()`)
     await sendCommand(win, { type: 'showPage', page: 'b' })
+    pushSynthetic()
     await sleep(260)
     const b = await js<{ pc: string; sec: string; cd: string }>(win, `(() => {
       const t = document.querySelectorAll('#pbBands .tile')[1]

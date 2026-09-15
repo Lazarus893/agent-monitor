@@ -206,6 +206,12 @@ const clipShort = (s: string): string =>
  * 四条家族规则，其余走兜底。**故意不做成一张查找表**：表只认见过的那几个，
  * 而模型每隔几周就出新的，认不出的那天屏上就会退回一串截断的 id。
  * 规则认的是**构词法**，新版本号、新代号都自动接得住。
+ *
+ * **每一条返回路径都过 `clipShort`**（m5-designer 2026-09-15 提的）：
+ * 构词法的输出长度是开放的 —— `claude-somelongname-5` 剥完仍然是 20 个字符，
+ * 而 B 页那一格按 ≤10 设计。只靠渲染层那条断言兜不住：它要在
+ * 「产品名最长的那一行 + ok 档 + 403 画布」同时成立时才会红，条件太窄。
+ * 长度是这个函数自己的契约，就在这儿闭合。
  */
 export function shortModel(raw: string | undefined): string | undefined {
   if (!raw) return undefined
@@ -217,18 +223,18 @@ export function shortModel(raw: string | undefined): string | undefined {
   const cl = /^claude-([a-z]+)((?:-\d+)*)$/i.exec(bare)
   if (cl) {
     const ver = cl[2]!.split('-').filter(Boolean).join('.')
-    return ver ? `${cap(cl[1]!)} ${ver}` : cap(cl[1]!)
+    return clipShort(ver ? `${cap(cl[1]!)} ${ver}` : cap(cl[1]!))
   }
   // 裸的家族名（转录里出现过 `opus`）
-  if (/^(opus|sonnet|haiku|fable)$/i.test(bare)) return cap(bare)
+  if (/^(opus|sonnet|haiku|fable)$/i.test(bare)) return clipShort(cap(bare))
 
   // Codex：gpt-<版本>-<代号> → 代号本身就是产品名（Astra / Sol）；没有代号就 `GPT-<版本>`
   const gp = /^gpt-([\d.]+)(?:-([a-z][a-z\d]*))?$/i.exec(bare)
-  if (gp) return gp[2] ? cap(gp[2]) : `GPT-${gp[1]}`
+  if (gp) return clipShort(gp[2] ? cap(gp[2]) : `GPT-${gp[1]}`)
 
   // 智谱：GLM-<主>.<次>，后面的档位词（Flash / Air…）不进短名
   const glm = /^(GLM-[\d.]+)/i.exec(bare)
-  if (glm) return glm[1]!.toUpperCase().replace('GLM', 'GLM')
+  if (glm) return clipShort(glm[1]!.toUpperCase())
 
   /* 兜底：去掉厂商前缀（第一个 `-` 之前那段，只有它像厂商名时才去），
      取最后一段、首字母大写、截到 10 字符。

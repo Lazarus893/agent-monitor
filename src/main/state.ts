@@ -40,6 +40,10 @@ type RawEvent = {
 const QUOTA = quotaJson as unknown as RawQuota
 const RAW_EVENTS = (eventsJson as unknown as { generatedAt: string; events: RawEvent[] }).events
 
+/** 在冻结原点上加 N 分钟，拿一个可复现的 resetsAt（edge 的 107h55m 用） */
+const plusMinutes = (iso: string, min: number): string =>
+  new Date(new Date(iso).getTime() + min * 60_000).toISOString()
+
 /** 时间原点冻结在 fixtures 的 generatedAt —— 倒计时与 resetsAt 自洽，截图可复现 */
 const NOW0 = new Date(QUOTA.generatedAt).getTime()
 const BOOT = Date.now()
@@ -84,12 +88,26 @@ const ATTN_EVENT: AgentEvent = {
   acked: false
 }
 
+/**
+ * fixtures 里三家的模型短名，与原型的 `TOP_MODEL` 对齐（REVISION 10）。
+ *
+ * 不加这一项的话，B 页在**所有** fixtures 帧上都不显示模型 —— 于是
+ * 「产品名 + 短名并排」这个最宽的组合在七态截图与逐格量尺里一次都测不到，
+ * 而 m5-designer 钉进 edge 的那个复现正是冲着这个组合来的。
+ * 真机上这个字段由 collectors/topmodel.ts 的 shortModel() 给。
+ */
+const TOP_MODEL: Record<AgentId, string> = {
+  codex: 'Astra', claude: 'Fable 5.1', zcode: 'GLM-5.3'
+}
+
 const agent = (
   id: AgentId,
   status: AgentState['status'],
   windows: QuotaWindow[],
   notice?: Notice
-): AgentState => ({ id, status, windows, updatedAt: QUOTA.generatedAt, notice })
+): AgentState => ({
+  id, status, windows, updatedAt: QUOTA.generatedAt, notice, topModel: TOP_MODEL[id]
+})
 
 const CODEX = QUOTA.codex.windows
 const CLAUDE = QUOTA.claude.windows
@@ -151,11 +169,16 @@ const SCENES: Record<SceneName, () => SceneBody> = {
         { label: '5h', usedPercent: 97, resetsAt: '2026-09-14T16:35:48+08:00' },
         CODEX[1]!
       ]),
+      /* Claude 这一行就是**实机那一帧**（m5-designer 2026-09-15 定位并钉进 fixture）：
+         61% 必须是 ok 档 —— warn/danger 时模型短名本来就不显示，
+         那样就复现不出「产品名 + 短名并排」这个最宽的组合；
+         只有 5h 没有 7d；倒计时 107h55m（7 字符）。
+         三样凑齐才会撞上「.b-name 的 basis 0 + .b-cd 定宽」那个左截断右留空。 */
       agent('claude', 'idle', [
-        { label: '5h', usedPercent: 82, resetsAt: CLAUDE[0]!.resetsAt },
-        CLAUDE[1]!
+        { label: '5h', usedPercent: 61, resetsAt: plusMinutes(QUOTA.generatedAt, 107 * 60 + 55) }
       ]),
-      agent('zcode', 'idle', ZCODE)
+      // warn 这一档挪给 ZCode，edge 仍是 danger / ok / warn 三档同屏
+      agent('zcode', 'idle', [{ ...ZCODE[0]!, usedPercent: 82 }, ...ZCODE.slice(1)])
     ],
     events: edgeFeed()
   }),
