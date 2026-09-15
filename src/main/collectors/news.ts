@@ -85,23 +85,21 @@ export function shortSource(raw: string): string {
 /**
  * 这一条的**站内阅读页**。
  *
- * 只取 `links.aihot`，退回顶层 `url` 字段；**不退回 `links.original`** ——
- * 原文链接指向公众号 / substack / 随便哪个站，那正是 brief-m0-v2 §8 的域名白名单
- * 要挡住的东西。取不到就返回 undefined，那一条点了不开。
+ * **只认 `links.aihot` 这一个字段**。不退回 `links.original`（原文指向公众号 /
+ * substack / 随便哪个站，正是白名单要挡的），也不退回顶层 `url`
+ * ——多一条来路就多一种「这个链接到底是谁给的」说不清的情况，
+ * 而它的终点是 `shell.openExternal`。取不到就返回 undefined，那一条点了不开。
  *
- * 这里只做「是不是个 http(s) 串」的粗筛；协议与域名的正式校验在主进程
- * （`safeNewsUrl`），因为那才是真正 `shell.openExternal` 的地方。
+ * 这里只做「是不是个 https 串」的粗筛；正式校验在主进程（`checkNewsLink`），
+ * 因为那才是真正交给操作系统的地方。
  */
 export function pickUrl(item: Record<string, unknown>): string | undefined {
   const links = item['links']
-  const candidates: unknown[] = isRec(links) ? [links['aihot']] : []
-  candidates.push(item['url'])
-  for (const c of candidates) {
-    if (typeof c !== 'string') continue
-    // 只接受 http(s)：javascript: / data: 这类绝不进任何地方
-    if (/^https?:\/\//i.test(c)) return c
-  }
-  return undefined
+  if (!isRec(links)) return undefined
+  const c = links['aihot']
+  if (typeof c !== 'string') return undefined
+  // javascript: / data: / file: 这类绝不进任何地方
+  return /^https:\/\//i.test(c) ? c : undefined
 }
 
 /**

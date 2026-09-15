@@ -228,7 +228,10 @@ pnpm icons        # 重新生成托盘图与 icon.icns（需要 Pillow，平时�
 - 面板与连接窗口各有自己的 preload：面板 5 个方法（`subscribe` / `onCommand` / `ack` /
   `setPage` / `rendered`，dev 构建下多一个 `dev` 子对象），连接窗口 2 个（`save` / `close`）；
   主进程侧每个 IPC handler 都校验 `event.sender`。
-- CSP `default-src 'none'`，外链只放行 https 且一律交给系统浏览器，`will-navigate` 全拦。
+- CSP `default-src 'none'`；面板窗口的开窗请求与同窗口导航**一律拒绝**，
+  不存在「渲染层让主进程去开一个 URL」这条路。E 页打开新闻走的是另一条：
+  渲染层只发条目 id，主进程从新闻缓存取站内阅读页，校验 `https:` 且域名属
+  `aihot.news` / `aihot.virxact.com` 之后才交给系统浏览器。
   打包后走 `file://` 已实测：脚本、样式、字体都正常加载，无 CSP 拒绝。
 - 调试通道（模拟事件 / 强制错误）由构建期常量守着，`pnpm build` 的产物里整段被摇掉。
 - Key 只在内存与钥匙串之间流转：写入走 `security -i`（命令从 stdin 读，`ps` 里看不到密钥），

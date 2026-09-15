@@ -55,10 +55,8 @@ describe('parseItems', () => {
     expect(pickUrl(RESPONSE.items[1] as Record<string, unknown>)).toBeUndefined()
   })
 
-  it('顶层 url 字段仍是退路（老形状的响应）', () => {
-    expect(pickUrl({ url: 'https://aihot.news/items/x' })).toBe('https://aihot.news/items/x')
-    // 协议不对的一律不收，连进内存都不进
-    expect(pickUrl({ url: 'javascript:alert(1)' })).toBeUndefined()
+  it('顶层 url 字段**不再**是退路 —— 只认 links.aihot 一个来路', () => {
+    expect(pickUrl({ url: 'https://aihot.news/items/x' })).toBeUndefined()
     expect(pickUrl({ links: { aihot: 'data:text/html,x' } })).toBeUndefined()
   })
 
@@ -73,9 +71,10 @@ describe('parseItems', () => {
     expect(parseItems(RESPONSE)[1]!.at).toBeUndefined()
   })
 
-  it('只接受 http(s) 的 url —— javascript: / data: 一律不进状态', () => {
+  it('只接受 https —— javascript: / data: / http: 一律不进内存', () => {
     expect(pickUrl({ links: { aihot: 'javascript:alert(1)' }, url: 'data:text/html,x' })).toBeUndefined()
-    expect(pickUrl({ url: 'https://ok.example' })).toBe('https://ok.example')
+    expect(pickUrl({ links: { aihot: 'http://aihot.news/x' } })).toBeUndefined()
+    expect(pickUrl({ links: { aihot: 'https://aihot.news/items/ok' } })).toBe('https://aihot.news/items/ok')
   })
 
   it('标题与摘要都被截断，换行压成一行', () => {

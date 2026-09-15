@@ -11,7 +11,7 @@
  * 以及重定位期间的 relocating 标志。
  */
 
-import { BrowserWindow, screen, shell } from 'electron'
+import { BrowserWindow, screen } from 'electron'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { dirname } from 'node:path'
@@ -24,6 +24,20 @@ import type { DisplayLike, Size, Target } from './displays.js'
 const here = dirname(fileURLToPath(import.meta.url))
 
 const CANVAS_BG = '#07080a' // --canvas
+
+/**
+ * 面板窗口的开窗请求一律拒绝，并记一行。
+ *
+ * 抽成纯函数只为能测：这是「渲染层能不能让主进程去开一个 URL」这个问题的
+ * 唯一答案点，而它的正确行为是「无论什么 URL 都不开」—— 那没法靠读代码保证。
+ */
+export function onWindowOpen(
+  url: string,
+  warn: (line: string) => void = console.warn
+): { action: 'deny' } {
+  warn(`[window] 拦下开窗请求（一律不开）：${url.slice(0, 96)}`)
+  return { action: 'deny' }
+}
 
 /** 事件合并窗口：一次插拔会连发好几个 screen 事件，只该落位一次 */
 const DEBOUNCE_MS = 300
@@ -78,16 +92,14 @@ export class MonitorWindow {
       }
     })
 
-    /* 面板上不该有任何能跳出去的东西。
-       M1 复核 §9.5-2：原来这里把**任意** URL 交给 `shell.openExternal` ——
-       包括 `file://` 与自定义 scheme，那等于把一个「点一下就让系统打开任意路径」
-       的口子留在保险丝里。只放行 https，其余记一行丢掉。
-       同时补上 `will-navigate`：真发生一次同窗口导航，面板会被导走且回不来。 */
-    this.win.webContents.setWindowOpenHandler(({ url }) => {
-      if (url.startsWith('https://')) void shell.openExternal(url)
-      else console.warn(`[window] 拦下非 https 的外链：${url.slice(0, 64)}`)
-      return { action: 'deny' }
-    })
+    /* 面板上不该有任何能跳出去的东西 —— **一个都不放行**。
+       M1 复核 §9.5-2 先把「任意 URL 交给 shell.openExternal」收窄成「只放行 https」，
+       但那仍然是一条口子：面板里本来就没有链接，这个 handler 永远不该被触发；
+       它真被触发，说明页面上出现了我们没写的东西，那一刻最不该做的就是
+       把那个 URL 交给操作系统。E 页要打开新闻走的是另一条路
+       （渲染层只发 id，主进程查白名单，见 main/newslink.ts），不经过这里。
+       同理 `will-navigate`：真发生一次同窗口导航，面板会被导走且回不来。 */
+    this.win.webContents.setWindowOpenHandler(({ url }) => onWindowOpen(url))
     this.win.webContents.on('will-navigate', (ev, url) => {
       console.warn(`[window] 拦下导航：${url.slice(0, 96)}`)
       ev.preventDefault()

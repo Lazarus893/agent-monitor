@@ -289,7 +289,10 @@ describe('浅扫 / 深扫', () => {
     utimesSync(old, t, t)
 
     const sk = sink()
-    const c = new CodexEvents(sk, dir)
+    /* 钟由测试握着：深扫是「距上次深扫 ≥60 s」触发的，用真实时钟的话，
+       机器一卡、这一轮跑过了 60 s，浅扫就会变成深扫，断言随负载随机变红。 */
+    let clock = Date.now()
+    const c = new CodexEvents(sk, dir, () => clock)
     await c.start()                       // 启动是全量：old 进表并记 offset
     expect(sk.events).toHaveLength(0)
 

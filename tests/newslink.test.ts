@@ -11,7 +11,8 @@ import { join } from 'node:path'
 import {
   MAX_NEWS_ID, NEWS_HOSTS, allowedNewsHost, checkNewsLink, validNewsId
 } from '../src/main/newslink.js'
-import { parseFeed } from '../src/main/collectors/news.js'
+import { parseFeed, pickUrl } from '../src/main/collectors/news.js'
+import { onWindowOpen } from '../src/main/window.js'
 
 describe('域名白名单', () => {
   it('就是简报写的那两个', () => {
@@ -115,5 +116,58 @@ describe('渲染层拿不到 URL', () => {
     const src = readFileSync(join(process.cwd(), 'src/shared/types.ts'), 'utf8')
     const block = src.slice(src.indexOf('export type NewsItem'), src.indexOf('export type NewsData'))
     expect(block).not.toMatch(/^\s*url\??:/m)
+  })
+})
+
+/* ==========================================================================
+   面板窗口：渲染层无论怎么 window.open，主进程都不去开。
+   E 页要打开新闻走的是另一条路（只发 id + 白名单，见上面那几组），不经过这里。
+   ========================================================================== */
+
+describe('setWindowOpenHandler 一律 deny', () => {
+  it('任意 URL 都只返回 deny，且不调用任何 opener', () => {
+    const warned: string[] = []
+    for (const url of [
+      'https://aihot.news/items/x',          // 连白名单里的也不开
+      'https://example.com/',
+      'http://example.com/',
+      'file:///etc/passwd',
+      'javascript:alert(1)',
+      'data:text/html,<script>1</script>',
+      'about:blank',
+      ''
+    ]) {
+      expect(onWindowOpen(url, l => warned.push(l))).toEqual({ action: 'deny' })
+    }
+    expect(warned).toHaveLength(8)
+    expect(warned.every(l => l.startsWith('[window] 拦下开窗请求'))).toBe(true)
+  })
+
+  it('window.ts 里没有 shell.openExternal 的**调用** —— 这条路彻底没有出口', () => {
+    const src = readFileSync(join(process.cwd(), 'src/main/window.ts'), 'utf8')
+    // 注释里可以提它（那段注释正是在解释为什么删掉），代码里不许有
+    expect(src).not.toMatch(/shell\s*\.\s*openExternal\s*\(/)
+    expect(src).not.toMatch(/^import .*\bshell\b.* from 'electron'/m)
+  })
+
+  it('超长 URL 只截一段进日志，不整条落盘', () => {
+    const warned: string[] = []
+    onWindowOpen('https://a.example/' + 'x'.repeat(5000), l => warned.push(l))
+    expect(warned[0]!.length).toBeLessThan(160)
+  })
+})
+
+describe('pickUrl 只认 links.aihot', () => {
+  it('顶层 url 不再是退路', () => {
+    expect(pickUrl({ url: 'https://aihot.news/items/x' })).toBeUndefined()
+    expect(pickUrl({ links: { aihot: 'https://aihot.news/items/x' } }))
+      .toBe('https://aihot.news/items/x')
+  })
+
+  it('原文链接、http、伪协议一律不收', () => {
+    expect(pickUrl({ links: { original: 'https://mp.weixin.qq.com/s' } })).toBeUndefined()
+    expect(pickUrl({ links: { aihot: 'http://aihot.news/x' } })).toBeUndefined()
+    expect(pickUrl({ links: { aihot: 'javascript:alert(1)' } })).toBeUndefined()
+    expect(pickUrl({})).toBeUndefined()
   })
 })
