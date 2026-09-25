@@ -159,7 +159,20 @@ describe('托盘偏好', () => {
 
   it('默认值：不静音、不置顶、登录自启开', () => {
     expect(readPrefs(tmp())).toEqual(DEFAULT_PREFS)
-    expect(DEFAULT_PREFS).toEqual({ muted: false, alwaysOnTop: false, openAtLogin: true, typingFollow: true })
+    expect(DEFAULT_PREFS).toEqual({
+      muted: false, alwaysOnTop: false, openAtLogin: true, typingFollow: true, midiSkin: 'shift'
+    })
+  })
+
+  it('midiSkin 只认三个已知值，写错的按默认', () => {
+    const file = tmp()
+    writePref('midiSkin', 'tabby', file)
+    expect(readPrefs(file).midiSkin).toBe('tabby')
+    writePref('midiSkin', 'siamese', file)
+    expect(readPrefs(file).midiSkin).toBe('siamese')
+    writeConfig({ midiSkin: 'lion' as never }, file)
+    expect(readConfig(file).midiSkin).toBeUndefined()
+    expect(readPrefs(file).midiSkin).toBe(DEFAULT_PREFS.midiSkin)
   })
 
   it('写一个开关不会动到 panelX', () => {

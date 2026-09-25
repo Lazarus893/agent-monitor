@@ -6,7 +6,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { CH } from '../shared/ipc.js'
 import type {
-  AgentId, MonitorApi, MonitorCommand, MonitorState, NoticeCode, Page, SceneName, TypingPulse
+  AgentId, MidiSkinPref, MonitorApi, MonitorCommand, MonitorState, NoticeCode, Page, SceneName, TypingPulse
 } from '../shared/types.js'
 
 const api: MonitorApi = {
@@ -37,6 +37,9 @@ const api: MonitorApi = {
   openNews(id: string) {
     // 只递一个 id。链接在主进程那边取与校验（shared/types.ts 的 NewsItem 注释说明了理由）
     ipcRenderer.send(CH.openNews, id)
+  },
+  setMidiSkin(value: MidiSkinPref) {
+    ipcRenderer.send(CH.setMidiSkin, value)
   }
 }
 

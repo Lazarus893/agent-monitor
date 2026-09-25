@@ -79,6 +79,21 @@ describe('parseLine', () => {
     expect(session.running).toBe(false)
   })
 
+  it('额度探针（codex-tui + cwd=/，CodexBar 敲 /status）：整份不出事件、不记 model', () => {
+    const { events, session } = run('codex-rollout-probe.jsonl')
+    expect(session.probe).toBe(true)
+    expect(events).toEqual([])
+    expect(session.model).toBeUndefined()
+  })
+
+  it('同样是 codex-tui，cwd 不是 / 就是真会话', () => {
+    const s = newSession('s')
+    const [meta, ...rest] = lines('codex-rollout-probe.jsonl')
+    parseLine(meta!.replace('"cwd":"/"', '"cwd":"/Users/me/proj"'), s, new Set())
+    const kinds = rest.map(l => parseLine(l, s, new Set())?.kind).filter(Boolean)
+    expect(kinds).toEqual(['running', 'completed'])
+  })
+
   it('审批事件名默认为空（本机全量扫描证明 rollout 里没有这类事件）', () => {
     expect(attentionTypes('').size).toBe(0)
     expect([...attentionTypes('exec_approval_request, foo')]).toEqual(['exec_approval_request', 'foo'])

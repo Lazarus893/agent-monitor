@@ -28,10 +28,13 @@ import type {
   AgentEvent, AgentId, AgentState, MonitorApi, MonitorState, NewsData, Notice, NoticeCode,
   Page, QuotaWindow, SceneName, TypingStatus, UsageData
 } from '../shared/types.js'
+import type { MidiSkin, MidiSkinPref } from '../shared/types.js'
 import { scaleFor } from '../shared/scale.js'
 import { newsWhen } from './timefmt.js'
-import { flowStep, frameFor, isNight, MIDI_TIMING, milestoneHop, stateText } from './midi.js'
-import { CAT, CAT_PAL, CAT_PAW_ROW, KEYBOARD, LAMP } from './midi-sprites.js'
+import { flowStep, frameFor, handoverFrame, isNight, MIDI_TIMING, milestoneHop, stateText } from './midi.js'
+import { catName, nextShiftAt, otherCat, resolveSkin } from '../shared/midi-cats.js'
+import { KEYBOARD, LAMP } from './midi-sprites.js'
+import { createCatPainter } from './midi-cat.js'
 import type { Frame } from './midi-sprites.js'
 
 declare global {
@@ -299,6 +302,7 @@ const el = {
   pc1Feed: $('pc1Feed'), pc2Feed: $('pc2Feed'),
   pdHeat: $('pdHeat'), peNews: $('peNews'), paAttn: $('paAttn'),
   pfScene: $<HTMLCanvasElement>('pfScene'), pfStats: $('pfStats'), pfState: $('pfState'),
+  pfSwap: $<HTMLButtonElement>('pfSwap'),
   feedTitle: $('feedTitle'), dots: $('dots'), live: $('live'), meter: $('meter'),
   unread: $('unread'), topLoading: $('topLoading'),
   panelxFlash: $('panelxFlash'), calib: $('calib')
@@ -336,6 +340,10 @@ let rm = window.matchMedia('(prefers-reduced-motion:reduce)').matches
 let muted = false
 /** 托盘「打字时切到 Midi」（M5），主进程经 `{type:'typingFollow'}` 推来，同 mute 的路 */
 let typingFollow = true
+/** 托盘「Midi 形象」：指定一只或轮班。主进程加载完推来之前是 null —— 那之前不解码任何图集。 */
+let skinPref: MidiSkinPref | null = null
+/** 轮班模式下按了「换班」：另一只顶到这个时刻（下一个交班点）为止；0 = 按排班来。固定模式下换班改的是偏好，不走这里。 */
+let swapUntil = 0
 /** 连敲判定：最近 BURST_WINDOW 内的脉冲时刻。碰一下键不该翻页，一句话开了头才算打字。 */
 const BURST_WINDOW = 2_000
 const BURST_COUNT = 3
@@ -724,22 +732,16 @@ function renderPageE(): void {
 
 /* ---------- 渲染：F 页 · Midi 打字伴侣 ---------- */
 
-/**
- * 场景坐标（CSS px，像素倍率固定 4，所有物件都落在 4 的整数倍网格上）。
- * 与原型 design/midi-prototype.html 的差别只有画幅：原型是一张独立样机，场景有 304×212；
- * F 页在 403 画布上只有 387 可用，左场景 224、右栏 151。物件的相对位置一格没动 ——
- * 砍掉的是原型右侧与上方的空气（DESK_Y 从 176 提到 92 —— 原型在灯上方留了 120px 的
- * 空房间，那是样机里「屏幕的上半部分」，在 F 页只会让猫看起来沉在页脚；其余偏移量与原型逐字相同）。
- * 上方仍留 36px：里程碑小跳（−8）与睡觉的 z（最高到 CAT_Y−6）都在这一格里。
- */
+/** 方案 3：猫框 96×96，顶部留 8px 小跳；224×128 场景和右栏宽度不变。
+ * 灯/键盘保持 4px 网格，猫使用独立的 96px 位图帧。 */
 const MIDI_PX = 4
 const SCENE_W = 224
 const SCENE_H = 128
-const DESK_Y = 92
-const CAT_X = 96
-const CAT_Y = DESK_Y - 14 * MIDI_PX + 4
-const KB_X = 84
-const KB_Y = DESK_Y - 4 * MIDI_PX + 2
+const DESK_Y = 104
+const CAT_X = 80
+const CAT_Y = 8
+const KB_X = 88
+const KB_Y = 94
 const LAMP_X = 12
 const LAMP_Y = DESK_Y - 14 * MIDI_PX
 
@@ -776,7 +778,11 @@ const midi = {
   /** 上一帧画的时刻，心流灯的衰减按它算 */
   lastAt: 0,
   /** 右栏上一次画出来的字数，变了才重画那一小块 */
-  shownToday: -1
+  shownToday: -1,
+  /** 当班的猫；偏好没到之前是 null */
+  skin: null as MidiSkin | null,
+  /** 正在换班：from 走出去、to 走进来，at 是开始时刻（now() 的钟） */
+  handover: null as { from: MidiSkin; to: MidiSkin; at: number } | null
 }
 
 function paintMidiStats(): void {
@@ -826,17 +832,18 @@ function renderPageF(): void {
 
 function paintMidiState(): void {
   const t = now()
-  const txt = stateText({
+  const txt = midi.handover ? `${catName(midi.handover.to)} 来接班` : stateText({
     now: t,
     lastInputAt: midi.lastInputAt,
     night: isNight(new Date(t).getHours()),
-    status: midi.status
+    status: midi.status,
+    name: catName(midi.skin ?? 'tabby')
   })
   if (el.pfState.textContent !== txt) el.pfState.textContent = txt
 }
 
 /**
- * 画布调色板。猫的 5 色是分类色（写在 sprites 里），场景的 4 个字符走 tokens ——
+ * 画布调色板。猫的分类色已在位图里，场景的 4 个字符走 tokens ——
  * 桌子和灯是这块屏的一部分，得跟着整屏的中性阶走。
  * 只取一次：tokens 是静态的，这屏没有主题切换。
  */
@@ -847,7 +854,6 @@ function midiPalette(): MidiPalette {
   const cs = getComputedStyle(root)
   const v = (n: string): string => cs.getPropertyValue(n).trim()
   midiPal = {
-    ...CAT_PAL,
     z: v('--mute'), L: v('--ink'), k: v('--hairline'), K: v('--canvas'),
     /* 桌面：台面线用 --hairline（与瓦片边同一道线），桌前立面是 --surface。
        影子比立面亮一档（--hairline）：灯在猫前面，影子是被挡住的**桌面**不是暗块。 */
@@ -859,8 +865,8 @@ function midiPalette(): MidiPalette {
 }
 
 function drawGrid(ctx: CanvasRenderingContext2D, grid: Frame, x: number, y: number,
-                  pal: MidiPalette, rowFrom = 0): void {
-  for (let r = rowFrom; r < grid.length; r++) {
+                  pal: MidiPalette): void {
+  for (let r = 0; r < grid.length; r++) {
     const row = grid[r]
     if (!row) continue
     for (let c = 0; c < row.length; c++) {
@@ -875,6 +881,30 @@ function drawGrid(ctx: CanvasRenderingContext2D, grid: Frame, x: number, y: numb
 let sceneCtx: CanvasRenderingContext2D | null = null
 /** 上一帧真正画出来的那一组值。相同就不画（见 drawMidi 的脏键）。 */
 let drawnKey = ''
+const drawCat = createCatPainter((skin, ok) => {
+  drawnKey = ''
+  if (skin === midi.skin) el.pfScene.dataset.artwork = ok ? 'ready' : 'error'
+  if (ok && pg.page === 'f') drawMidi(now())
+})
+
+/**
+ * 谁当班。偏好 + 钟点 → 该是谁；变了就换。
+ * 换班动画只在三件事同时成立时走：这一页正显示着（animate）、没开 reduced-motion、
+ * 上一只的图集已经就绪（否则没东西可走出去）。从别的页回来时发现该换了，直接换 ——
+ * 那次换班发生在看不见的时候，不该回放。
+ */
+function syncSkin(t: number, animate: boolean): void {
+  if (!skinPref) return
+  const scheduled = resolveSkin(skinPref, new Date(t).getHours())
+  const want = skinPref === 'shift' && t < swapUntil ? otherCat(scheduled) : scheduled
+  if (want === midi.skin) return
+  const prev = midi.skin
+  midi.skin = want
+  drawCat.load(want)
+  el.pfScene.dataset.artwork = drawCat.ready(want) ? 'ready' : 'loading'
+  midi.handover = animate && !rm && prev && drawCat.ready(prev) ? { from: prev, to: want, at: t } : null
+  drawnKey = ''
+}
 
 /** 画一帧。t 是 now()，所有位移都是整数像素，只有灯光的透明度是平滑的。 */
 function drawMidi(t: number): void {
@@ -892,14 +922,20 @@ function drawMidi(t: number): void {
     blinkUntil: rm ? 0 : midi.blinkUntil,
     status: midi.status
   })
-  // 里程碑小跳：2 格上、2 格下，480 ms，切帧不补间；点头是 1px 的两帧循环
+  const pose = !rm && frame === 'idle' && midi.status === 'ok' && t % 10_000 < 250 ? 'ear' : frame
+  // 换班中：两只猫的位置由编排给，到点就收
+  const skin = midi.skin ?? 'tabby'
+  let ho = midi.handover ? handoverFrame(t - midi.handover.at) : null
+  if (ho?.done) { midi.handover = null; ho = null }
+  el.pfScene.dataset.pose = ho ? 'handover' : pose
+  // 里程碑小跳：2 格上、2 格下，480 ms，切帧不补间；呼吸是 2px 的两帧循环
   const hop = !rm && t < midi.hopUntil && (midi.hopUntil - t) / 480 > 0.4 ? -2 * MIDI_PX : 0
   const gap = midi.lastInputAt ? t - midi.lastInputAt : 0
   const bob = !rm && gap > MIDI_TIMING.TYPE_MS && gap < MIDI_TIMING.SLEEP_MS &&
-    Math.floor(t / 600) % 2 ? -1 : 0
+    Math.floor(t / 1_200) % 2 ? -2 : 0
   const lit = t < midi.litUntil && midi.litKey >= 0 ? midi.litKey : -1
   // 睡觉的 z：只在「打完字之后自己睡着」时冒，没权限 / 没连上那两种趴着不冒
-  const zPhase = frame === 'sleep' && midi.status === 'ok' && midi.lastInputAt
+  const zPhase = !ho && frame === 'sleep' && midi.status === 'ok' && midi.lastInputAt
     ? Math.floor(t / 700) % 3 : -1
   // 影子：灯越亮影子越长，一格一格来（0–3 格）
   const shadow = Math.round(midi.flow * 3) * MIDI_PX
@@ -911,8 +947,9 @@ function drawMidi(t: number): void {
      `prefers-reduced-motion` 下不跳、不点头、不眨眼，这一页于是几乎不再重绘。
      键在 drawMidi 里算而不是在 midiFrame 里：frame / hop / bob 这些值本来就是
      这里算的，挪到外面等于把同一段逻辑写两遍，那两份迟早会有一份忘了改。 */
-  const key = `${frame}|${night ? 1 : 0}|${Math.round(midi.flow * 100)}|${shadow}|${hop}|${bob}` +
-    `|${lit}|${midi.paw}|${zPhase}|${midi.has ? 1 : 0}|${midi.today}|${midi.yesterday}|${midi.streak}`
+  const key = `${pose}|${night ? 1 : 0}|${Math.round(midi.flow * 100)}|${shadow}|${hop}|${bob}` +
+    `|${lit}|${midi.paw}|${zPhase}|${midi.has ? 1 : 0}|${midi.today}|${midi.yesterday}|${midi.streak}|${skin}` +
+    (ho ? `|h${ho.out?.pose}${ho.out?.x}${ho.out?.bob}|${ho.in?.pose}${ho.in?.x}${ho.in?.bob}` : '')
   if (key === drawnKey) return
   drawnKey = key
 
@@ -936,8 +973,6 @@ function drawMidi(t: number): void {
     ctx.fillRect(LAMP_X + 4, LAMP_Y + 4, 16, 8)
     ctx.globalAlpha = dim
   }
-  drawGrid(ctx, LAMP, LAMP_X, LAMP_Y, pal)
-
   ctx.fillStyle = pal.k!
   ctx.fillRect(0, DESK_Y, SCENE_W, 2)
   ctx.fillStyle = pal.desk!
@@ -949,20 +984,26 @@ function drawMidi(t: number): void {
   }
 
   const cy = CAT_Y + hop + bob
-  drawGrid(ctx, CAT[frame], CAT_X, cy, pal)
+  if (ho) {
+    // 换班：两只都在键盘后面走，前爪不压键；走出画面的那只已经是 null
+    if (ho.out) drawCat(ctx, midi.handover!.from, ho.out.pose, ho.out.x, CAT_Y + ho.out.bob)
+    if (ho.in) drawCat(ctx, midi.handover!.to, ho.in.pose, ho.in.x, CAT_Y + ho.in.bob)
+  } else drawCat(ctx, skin, pose, CAT_X, cy)
+  // 灯在猫之后画：换班时接班的猫从灯后面走过；平时两者不重叠，顺序无所谓
+  drawGrid(ctx, LAMP, LAMP_X, LAMP_Y, pal)
 
-  // 键盘画在猫前面（它坐在桌子后面），再把爪子那三行补画上去：爪子在键上，不在键后
+  // 键盘画在猫前面，再把前爪补画在键帽上。
   drawGrid(ctx, KEYBOARD, KB_X, KB_Y, pal)
   if (lit >= 0) {
     ctx.fillStyle = pal.L!
     ctx.fillRect(KB_X + (1 + lit * 2) * MIDI_PX, KB_Y + (midi.paw ? 3 : 1) * MIDI_PX,
       MIDI_PX, MIDI_PX)
   }
-  if (frame !== 'sleep') drawGrid(ctx, CAT[frame], CAT_X, cy, pal, CAT_PAW_ROW)
+  if (!ho && frame !== 'sleep') drawCat(ctx, skin, pose, CAT_X, cy, true)
 
   if (zPhase >= 0) {
     ctx.fillStyle = pal.z!
-    for (let i = 0; i <= zPhase; i++) ctx.fillRect(CAT_X + 66 + i * 6, CAT_Y + 10 - i * 8, 3, 3)
+    for (let i = 0; i <= zPhase; i++) ctx.fillRect(CAT_X + 80 + i * 6, CAT_Y + 34 - i * 8, 3, 3)
   }
   ctx.globalAlpha = 1
 }
@@ -980,13 +1021,14 @@ let midiRaf = 0
 let midiTimer: ReturnType<typeof setTimeout> | null = null
 const MIDI_IDLE_HZ = 8
 function scheduleMidi(t: number): void {
-  const busy = t - midi.lastInputAt < 1_500 || t < midi.hopUntil
+  const busy = t - midi.lastInputAt < 1_500 || t < midi.hopUntil || midi.handover !== null
   if (busy) midiRaf = requestAnimationFrame(midiFrame)
   else midiTimer = setTimeout(midiFrame, 1000 / MIDI_IDLE_HZ)
 }
 function midiFrame(): void {
   midiRaf = 0; midiTimer = null
   const t = now()
+  syncSkin(t, true)
   scheduleMidi(t)
   /* dt 不设上限：心流灯的衰减是单调的且有底（0.06），从别的页回来时一步补齐正好，
      而不是让灯停在离开时的亮度上慢慢往下掉。
@@ -997,7 +1039,7 @@ function midiFrame(): void {
   midi.flow = flowStep(midi.flow, { now: t, lastInputAt: midi.lastInputAt, dt })
   if (!rm && t > midi.blinkAt) {
     midi.blinkAt = t + 3_000 + Math.random() * 4_000
-    midi.blinkUntil = t + 110
+    midi.blinkUntil = t + 220
   }
   if (midi.shownToday !== midi.today) paintMidiStats()
   paintMidiState()
@@ -1007,7 +1049,7 @@ function midiFrame(): void {
 function syncMidiLoop(): void {
   const on = pg.page === 'f'
   const running = midiRaf !== 0 || midiTimer !== null
-  if (on && !running) midiRaf = requestAnimationFrame(midiFrame)
+  if (on && !running) { syncSkin(now(), false); midiRaf = requestAnimationFrame(midiFrame) }
   else if (!on && running) {
     if (midiRaf) cancelAnimationFrame(midiRaf)
     if (midiTimer) clearTimeout(midiTimer)
@@ -1496,6 +1538,20 @@ if (DEBUG) {
   $('btnType').addEventListener('click', () => window.monitor.dev?.simulateTyping(60))
 }
 
+/* ---------- F 页「换班」 ---------- */
+
+/**
+ * 让另一只猫现在来接班。轮班模式下是临时的：顶到下一个交班点，再按一下就撤销；
+ * 固定了某一只时改的是偏好本身（走主进程落盘，托盘勾选跟着变，command 推回来才生效）。
+ * 换班进行中不响应 —— 两只猫还在路上。
+ */
+el.pfSwap.addEventListener('click', () => {
+  if (!skinPref || !midi.skin || midi.handover) return
+  const t = now()
+  if (skinPref === 'shift') swapUntil = t < swapUntil ? 0 : nextShiftAt(t)
+  else window.monitor.setMidiSkin(otherCat(midi.skin))
+})
+
 /* ---------- 主进程指令 ---------- */
 
 window.monitor.onCommand(cmd => {
@@ -1517,6 +1573,12 @@ window.monitor.onCommand(cmd => {
     return
   } else if (cmd.type === 'typingFollow') {
     typingFollow = cmd.value
+    return
+  } else if (cmd.type === 'midiSkin') {
+    skinPref = cmd.value
+    swapUntil = 0
+    // 这一页正显示着就交给动画循环（下一帧带换班动画）；不在这页就直接换
+    if (pg.page !== 'f') syncSkin(now(), false)
     return
   }
   applyPage()

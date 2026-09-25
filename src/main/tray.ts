@@ -25,6 +25,14 @@ import { claudeStatus, runInstall, scriptsAvailable, statusLabel } from './insta
 import type { ClaudeStatus, InstallTask } from './install.js'
 import { assetDir } from './resources.js'
 import type { Prefs } from './config.js'
+import type { MidiSkinPref } from '../shared/types.js'
+import { MIDI_CATS, SHIFT } from '../shared/midi-cats.js'
+
+/** 「Midi 形象」子菜单：两只猫各一项，再加「轮班」。顺序就是菜单顺序。 */
+export const MIDI_SKINS: ReadonlyArray<{ id: MidiSkinPref; label: string }> = [
+  ...MIDI_CATS.map(c => ({ id: c.id, label: `${c.name} · ${c.breed}` })),
+  { id: 'shift', label: `轮班 · ${MIDI_CATS[0]!.name} ${SHIFT.DAY_START}–${SHIFT.NIGHT_START} 点，${MIDI_CATS[1]!.name} 其余时间` }
+]
 
 const TITLE_FLASH_MS = 3000
 /** 「Claude 采集」那一行可能被别的进程改，所以周期重建。一次 readFileSync 的量级。 */
@@ -40,6 +48,7 @@ export type TrayDeps = {
   /** 勾选后的落地。写配置由调用方做，这里只报事件。 */
   setMuted: (v: boolean) => void
   setTypingFollow: (v: boolean) => void
+  setMidiSkin: (v: MidiSkinPref) => void
   setAlwaysOnTop: (v: boolean) => void
   setOpenAtLogin: (v: boolean) => void
   /** 回到总览页（等价 ⌃⌥↑） */
@@ -118,6 +127,7 @@ export class TrayMenu {
     }, {
       setMuted: v => { this.deps.setMuted(v); this.rebuild() },
       setTypingFollow: v => { this.deps.setTypingFollow(v); this.rebuild() },
+      setMidiSkin: v => { this.deps.setMidiSkin(v); this.rebuild() },
       setAlwaysOnTop: v => { this.deps.setAlwaysOnTop(v); this.rebuild() },
       setOpenAtLogin: v => { this.deps.setOpenAtLogin(v); this.rebuild() },
       home: () => this.deps.home(),
@@ -206,6 +216,7 @@ export type TrayActions = {
   setAlwaysOnTop: (v: boolean) => void
   setOpenAtLogin: (v: boolean) => void
   setTypingFollow: (v: boolean) => void
+  setMidiSkin: (v: MidiSkinPref) => void
   home: () => void
   connect: () => void
   install: (task: InstallTask) => void
@@ -245,6 +256,16 @@ export function trayTemplate(s: TrayState, a: TrayActions): Electron.MenuItemCon
       type: 'checkbox',
       checked: s.prefs.typingFollow,
       click: item => a.setTypingFollow(item.checked)
+    },
+    {
+      // 两只猫共用一套动作与场景；副屏上没有按钮，这里是唯一的切换入口。换班有走位动画。
+      label: 'Midi 形象',
+      submenu: MIDI_SKINS.map(k => ({
+        label: k.label,
+        type: 'radio' as const,
+        checked: s.prefs.midiSkin === k.id,
+        click: () => a.setMidiSkin(k.id)
+      }))
     },
     { label: '回到总览页', click: () => a.home() },
     { type: 'separator' },

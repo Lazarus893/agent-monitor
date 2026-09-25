@@ -29,11 +29,16 @@
       <section class="page page-c" data-p="c2"><h2 class="sr">更早的 session</h2><div class="feed" id="pc2Feed"></div></section>
       <section class="page page-d" data-p="d"><h2 class="sr">每日用量</h2><div class="dwrap" id="pdHeat"></div></section>
       <section class="page page-e" data-p="e"><h2 class="sr">今日 AI 大事</h2><div class="ewrap" id="peNews"></div></section>
-      <!-- F 页：左边是像素场景（canvas 固定 224×128 = 56×32 格 × 4px，倍率只能是整数），
+      <!-- F 页：左边是像素场景（canvas 固定 224×128，猫框 96×96），
            右边三个数 + 一行文案。场景是纯装饰，它说的每件事文案里都有，所以对无障碍树隐藏。 -->
       <section class="page page-f" data-p="f"><h2 class="sr">Midi 打字伴侣</h2>
         <div class="fwrap">
-          <canvas class="f-scene" id="pfScene" width="224" height="128" aria-hidden="true"></canvas>
+          <!-- 场景下方居中一粒「换班」。这是副屏上除翻页外唯一的按钮：托盘图标在满的菜单栏里会被藏掉，换猫得有条不靠托盘的路。
+               放在场景正下方而不是右栏：右栏的底角落在 15% 宽的翻页热区里，会被它盖住。 -->
+          <div class="f-stage">
+            <canvas class="f-scene" id="pfScene" width="224" height="128" aria-hidden="true"></canvas>
+            <button type="button" class="f-swap" id="pfSwap" aria-label="换班：让另一只猫来接班">换班</button>
+          </div>
           <div class="f-side"><div class="f-stats" id="pfStats"></div><p class="f-state" id="pfState"></p></div>
         </div>
       </section>

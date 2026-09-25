@@ -1,0 +1,122 @@
+[
+  {
+    "kind": "idle",
+    "page": "f",
+    "artwork": "ready",
+    "pose": "idle",
+    "sideOverflow": false,
+    "text": "Midi 在等你"
+  },
+  {
+    "kind": "blink",
+    "page": "f",
+    "artwork": "ready",
+    "pose": "blink",
+    "sideOverflow": false,
+    "text": "Midi 在等你"
+  },
+  {
+    "kind": "ear",
+    "page": "f",
+    "artwork": "ready",
+    "pose": "ear",
+    "sideOverflow": false,
+    "text": "Midi 在等你"
+  },
+  {
+    "kind": "typeL",
+    "page": "f",
+    "artwork": "ready",
+    "pose": "typeL",
+    "sideOverflow": false,
+    "text": "Midi 在打字"
+  },
+  {
+    "kind": "typeR",
+    "page": "f",
+    "artwork": "ready",
+    "pose": "typeR",
+    "sideOverflow": false,
+    "text": "Midi 在打字"
+  },
+  {
+    "kind": "look",
+    "page": "f",
+    "artwork": "ready",
+    "pose": "look",
+    "sideOverflow": false,
+    "text": "Midi 在看你"
+  },
+  {
+    "kind": "sleep",
+    "page": "f",
+    "artwork": "ready",
+    "pose": "sleep",
+    "sideOverflow": false,
+    "text": "Midi 睡着了"
+  },
+  {
+    "kind": "night",
+    "page": "f",
+    "artwork": "ready",
+    "pose": "night",
+    "sideOverflow": false,
+    "text": "咖啡 困了"
+  },
+  {
+    "kind": "untrusted",
+    "page": "f",
+    "artwork": "ready",
+    "pose": "sleep",
+    "sideOverflow": false,
+    "text": "系统设置 › 隐私与安全性 › 辅助功能 里勾上 Agent Monitor"
+  },
+  {
+    "kind": "offline",
+    "page": "f",
+    "artwork": "ready",
+    "pose": "sleep",
+    "sideOverflow": false,
+    "text": "还没连上 Midi 的耳朵"
+  },
+  {
+    "kind": "connecting",
+    "page": "f",
+    "artwork": "ready",
+    "pose": "idle",
+    "sideOverflow": false,
+    "text": "Midi 正在醒来"
+  },
+  {
+    "kind": "wide",
+    "page": "f",
+    "artwork": "ready",
+    "pose": "idle",
+    "sideOverflow": false,
+    "text": "Midi 在等你"
+  },
+  {
+    "kind": "reduced",
+    "page": "f",
+    "artwork": "ready",
+    "pose": "typeL",
+    "sideOverflow": false,
+    "text": "Midi 在打字"
+  },
+  {
+    "kind": "handover",
+    "page": "f",
+    "artwork": "ready",
+    "pose": "handover",
+    "sideOverflow": false,
+    "text": "咖啡 来接班"
+  },
+  {
+    "kind": "swap",
+    "page": "f",
+    "artwork": "ready",
+    "pose": "handover",
+    "sideOverflow": false,
+    "text": "咖啡 来接班"
+  }
+]

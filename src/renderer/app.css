@@ -556,9 +556,9 @@ html[data-debug="1"] .harness{display:flex}
    覆盖）同一个处置：画布样式的真源不止一份时，各自留在自己那份里，差异写在注释上。
    ========================================================================== */
 .page-f .fwrap{flex:1;display:flex;align-items:center;gap:var(--sp-md);min-height:0}
-/* 场景是整数倍放大的像素画：固定 CSS 尺寸 + pixelated，任何非整数缩放都会让
-   4px 的格子出现半格接缝。224×128 = 56×32 格 × 4px，在 403 画布上占 58% 宽，
-   480 画布上多出来的宽度全部落给右栏（场景不跟着变，倍率就不会掉出整数）。 */
+/* 场景固定 224×128；灯和键盘为 4px 网格，方案 3 小猫使用 96×96 位图缓存。
+   在 403 画布上占 58% 宽，480 画布上多出来的宽度全部落给右栏。
+   小猫的 source crop 和脚底定位见 midi-sprites.ts。 */
 .page-f .f-scene{flex:none;width:224px;height:128px;image-rendering:pixelated}
 .page-f .f-side{flex:1;min-width:0;align-self:stretch;display:flex;flex-direction:column;
   gap:var(--sp-sm);padding-top:var(--sp-sm)}
@@ -581,3 +581,12 @@ html[data-debug="1"] .harness{display:flex}
    14px 下它在 151px 内宽里就是 3 行，截成一行等于把唯一的补救路径截掉。 */
 .page-f .f-state{margin:auto 0 0;font-size:var(--fs-min);color:var(--body);line-height:1.3;
   display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+/* 场景 + 「换班」竖排一列，按钮在场景正下方居中，避开左右各 15% 的翻页热区。 */
+.page-f .f-stage{flex:none;display:flex;flex-direction:column;align-items:center;gap:var(--sp-xs)}
+/* 「换班」：一粒发丝线边的胶囊，灰字，只在悬停 / 聚焦时提到 ink —— 它是个偶尔用一次的开关，不该和数字抢眼。 */
+.page-f .f-swap{appearance:none;flex:none;border:1px solid var(--hairline);border-radius:var(--r-full);
+  background:transparent;color:var(--mute);font:inherit;font-size:var(--fs-min);line-height:1;
+  padding:5px 10px;cursor:pointer;transition:color var(--dur-state) var(--ease-standard),border-color var(--dur-state) var(--ease-standard)}
+.page-f .f-swap:hover{color:var(--ink);border-color:var(--mute)}
+.page-f .f-swap:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--accent)}
+.page-f .f-swap:disabled{opacity:.4;cursor:default}

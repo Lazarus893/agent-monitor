@@ -88,6 +88,19 @@ export type CodexSession = {
   running: boolean
   attention: boolean
   startedAt?: string
+  /** 别的程序拉起来探额度的 TUI（见 `isProbe`）：不出事件、不计 model */
+  probe?: boolean
+}
+
+/**
+ * 额度探针：CodexBar 这类菜单栏 app 在 PTY 里起 `codex` 敲 `/status` 读额度，
+ * 每次都落一份 rollout。实测（2026-09-23，本机 9 月全部 269 份）：
+ * 222 份探针全是 `originator=codex-tui` + `cwd=/`（GUI 进程的工作目录），
+ * 47 份真实会话无一命中。按内容分不干净 —— 探针里有 17 份让模型真回了话，
+ * 而 Desktop 子 agent 与 `#` 开头的 exec prompt 同样拿不到标题。
+ */
+function isProbe(meta: Record<string, unknown>): boolean {
+  return meta['originator'] === 'codex-tui' && meta['cwd'] === '/'
 }
 
 export const newSession = (sessionId: string): CodexSession => ({
@@ -129,8 +142,10 @@ export function parseLine(
     const id = payload['session_id'] ?? payload['id']
     if (typeof id === 'string') s.sessionId = id
     if (typeof payload['cwd'] === 'string') s.cwd = payload['cwd']
+    if (isProbe(payload)) s.probe = true
     return null
   }
+  if (s.probe) return null
 
   if (type === 'turn_context') {
     if (typeof payload['model'] === 'string') s.model = payload['model']

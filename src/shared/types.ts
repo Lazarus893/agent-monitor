@@ -189,6 +189,11 @@ export type TypingData = {
 /** 心跳层的一次脉冲：某一刻新增了 delta 个字。没有内容、没有 app 名 —— 渲染层不需要知道更多。 */
 export type TypingPulse = { at: number; delta: number }
 
+/** Midi 的形象：两套 8 姿态图集，网格布局相同，只换图片和裁切矩形。 */
+export type MidiSkin = 'tabby' | 'siamese'
+/** 托盘里的选择：指定一只，或「轮班」（按钟点轮流，见 shared/midi-cats.ts）。 */
+export type MidiSkinPref = MidiSkin | 'shift'
+
 export type SceneName =
   | 'populated' | 'loading' | 'empty' | 'error' | 'edge' | 'attention' | 'running' | 'full'
 
@@ -261,6 +266,8 @@ export type MonitorCommand =
   | { type: 'mute'; value: boolean }
   /** M5 · 托盘「打字时切到 Midi」。同 mute：偏好不进 state，主进程 did-finish-load 补推。 */
   | { type: 'typingFollow'; value: boolean }
+  /** 托盘「Midi 形象」。同 mute / typingFollow：偏好不进 state，主进程 did-finish-load 补推。 */
+  | { type: 'midiSkin'; value: MidiSkinPref }
 
 export type DevApi = {
   /** 场景名 = 喂 fixtures；'live' = 切回真实采集 */
@@ -291,6 +298,8 @@ export type MonitorApi = {
    * **只发 id**，不发 URL —— 链接与校验都在主进程那边（见 NewsItem 的注释）。
    */
   openNews(id: string): void
+  /** F 页「换班」按钮：固定了某一只时改成另一只。值由主进程校验、落盘，并经 command 推回来生效。 */
+  setMidiSkin(value: MidiSkinPref): void
   /**
    * 调试栏用的那几个模拟入口。**打包产物里不存在**（preload 里按构建期常量挂上），
    * 所以是可选的 —— 调用点必须写 `?.`，这正是它的真实形态。

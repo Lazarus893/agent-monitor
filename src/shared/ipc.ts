@@ -12,7 +12,9 @@ export const CH = {
   rendered: 'monitor:rendered',
   dev: 'monitor:dev',
   /** renderer → main：打开某条新闻（只带 id，链接由主进程解析与校验） */
-  openNews: 'monitor:open-news'
+  openNews: 'monitor:open-news',
+  /** renderer → main：F 页「换班」按钮改 Midi 形象偏好；主进程落盘、重建托盘，再经 command 推回 */
+  setMidiSkin: 'monitor:set-midi-skin'
 } as const
 
 /* 「连接 ZCode」窗口的两条频道不在这里 —— 见 shared/connect-ipc.ts 文件头，

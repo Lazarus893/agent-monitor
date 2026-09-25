@@ -17,7 +17,7 @@ import { registerShortcuts, unregisterShortcuts } from './shortcuts.js'
 import { CH } from '../shared/ipc.js'
 import type { DevMessage } from '../shared/ipc.js'
 import { SCENE_NAMES } from '../shared/types.js'
-import type { AgentId, MonitorCommand, MonitorState, NoticeCode, Page, SceneName } from '../shared/types.js'
+import type { AgentId, MonitorCommand, MonitorState, NoticeCode, Page, SceneName, MidiSkinPref } from '../shared/types.js'
 import { setForcedError, startQuota } from './collectors/quota/index.js'
 import { startEvents } from './collectors/events/index.js'
 import { startV2 } from './collectors/v2.js'
@@ -138,6 +138,8 @@ async function main(): Promise<void> {
     // 静音是个偏好、不在 state 里，所以每次加载完都补推一次（崩溃重载后也不会丢）
     send({ type: 'mute', value: prefs.muted })
     send({ type: 'typingFollow', value: prefs.typingFollow })
+    // 猫的图集由渲染层按这个值才开始解码，所以它和上面两条一样每次加载完都推
+    send({ type: 'midiSkin', value: prefs.midiSkin })
   })
   const unsubscribe = store.subscribe(push)
 
@@ -280,6 +282,19 @@ async function main(): Promise<void> {
   applyAlwaysOnTop(prefs.alwaysOnTop)
   applyOpenAtLogin(prefs.openAtLogin)
 
+  /* Midi 形象：托盘单选和 F 页「换班」按钮走同一个出口 —— 落盘、推给渲染层、托盘勾选跟上。 */
+  function setMidiSkin(v: MidiSkinPref): void {
+    prefs = { ...prefs, midiSkin: v }
+    writePref('midiSkin', v)
+    send({ type: 'midiSkin', value: v })
+    tray?.rebuild()
+    console.log(`[midi] 形象 ${v}`)
+  }
+  ipcMain.on(CH.setMidiSkin, (e, v: unknown) => {
+    if (!fromPanel(e)) return
+    if (v !== 'tabby' && v !== 'siamese' && v !== 'shift') { console.warn('[midi] 换班请求被拒：值不合法'); return }
+    setMidiSkin(v)
+  })
   const tray = SHOOT || SELFTEST ? null : new TrayMenu({
     version: app.getVersion(),
     displayLabel: () => mw.target()?.label ?? '主屏窗口',
@@ -307,6 +322,7 @@ async function main(): Promise<void> {
       send({ type: 'typingFollow', value: v })
       console.log(`[tray] 打字时切到 Midi ${v ? '开' : '关'}`)
     },
+    setMidiSkin,
     home: () => send({ type: 'home' }),
     calibrate: () => send({ type: 'calibrate' }),
     resetPanelX: () => applyPanelX(panel.reset(canvas)),

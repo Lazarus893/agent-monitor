@@ -7,7 +7,7 @@
  */
 
 import type { TypingStatus } from '../shared/types.js'
-import type { FrameName } from './midi-sprites.js'
+import type { CatPose, FrameName } from './midi-sprites.js'
 
 /** 打字：最后一个字之后这么久内都算「在打」，每个脉冲切一次爪 */
 const TYPE_MS = 600
@@ -47,7 +47,10 @@ export function frameFor(i: FrameInput): FrameName {
   if (i.status === 'untrusted' || i.status === 'offline') return 'sleep'
   if (i.status === 'connecting') return 'idle'
   // 这一程还没收到过脉冲：猫在等你，不是睡着了（idle - 0 会算出一个巨大的停顿）
-  if (!i.lastInputAt) return i.night ? 'night' : 'idle'
+  if (!i.lastInputAt) {
+    if (i.now < i.blinkUntil) return 'blink'
+    return i.night ? 'night' : 'idle'
+  }
   const idle = i.now - i.lastInputAt
   if (idle < TYPE_MS) return i.paw ? 'typeL' : 'typeR'
   if (idle >= SLEEP_MS) return 'sleep'
@@ -88,6 +91,8 @@ export type StateInput = {
   lastInputAt: number
   night: boolean
   status: TypingStatus
+  /** 当班那只猫的名字（Midi / 咖啡）。 */
+  name: string
 }
 
 /**
@@ -96,15 +101,56 @@ export type StateInput = {
  * 一句都不带评价：它只说猫在干什么，不说你在干什么。
  */
 export function stateText(i: StateInput): string {
-  if (i.status === 'connecting') return 'Midi 正在醒来'
+  if (i.status === 'connecting') return `${i.name} 正在醒来`
   if (i.status === 'untrusted') return '系统设置 › 隐私与安全性 › 辅助功能 里勾上 Agent Monitor'
-  if (i.status === 'offline') return '还没连上 Midi 的耳朵'
-  if (!i.lastInputAt) return 'Midi 在等你'
+  if (i.status === 'offline') return `还没连上 ${i.name} 的耳朵`
+  if (!i.lastInputAt) return `${i.name} 在等你`
   const idle = i.now - i.lastInputAt
-  if (idle < TYPE_MS) return 'Midi 在打字'
-  if (idle >= SLEEP_MS) return 'Midi 睡着了'
-  if (idle > LOOK_MS) return i.night ? 'Midi 眯着眼看你' : 'Midi 在看你'
-  return i.night ? 'Midi 困了' : 'Midi 在歇爪'
+  if (idle < TYPE_MS) return `${i.name} 在打字`
+  if (idle >= SLEEP_MS) return `${i.name} 睡着了`
+  if (idle > LOOK_MS) return i.night ? `${i.name} 眯着眼看你` : `${i.name} 在看你`
+  return i.night ? `${i.name} 困了` : `${i.name} 在歇爪`
+}
+
+/* ==========================================================================
+   换班 —— 两只猫在键盘后面走位。没有走路帧，用左右爪交替帧 + 2px 起伏在网格上平移。
+   时间轴（ms）：
+     0–360        当班的猫抬头看一眼（look）
+     360–1320     它向右走出画面：160px，每 120ms 换一次爪、起伏一次
+     1200–2160    接班的猫从左边走进来（比前一段早 120ms 起步，两只不重叠）
+     2160–2460    坐定，动一下耳朵
+   位移一律落 4px 网格；reduced-motion 下不调用这里，直接换。
+   ========================================================================== */
+export const HANDOVER = {
+  LOOK_MS: 360, WALK_MS: 960, OVERLAP_MS: 120, SETTLE_MS: 300, STEP_MS: 120,
+  HOME_X: 80, EXIT_PX: 160, ENTER_X: -96, SCENE_W: 224, GRID: 4
+} as const
+export const HANDOVER_MS = HANDOVER.LOOK_MS + HANDOVER.WALK_MS - HANDOVER.OVERLAP_MS + HANDOVER.WALK_MS + HANDOVER.SETTLE_MS
+
+export type Walker = { pose: CatPose; x: number; bob: number }
+export type HandoverFrame = { out: Walker | null; in: Walker | null; done: boolean }
+
+const snap = (v: number): number => Math.round(v / HANDOVER.GRID) * HANDOVER.GRID
+const stepping = (q: number, from: number, dist: number): Walker => {
+  const step = Math.floor(q / HANDOVER.STEP_MS)
+  return { pose: step % 2 ? 'typeL' : 'typeR', x: from + snap(dist * q / HANDOVER.WALK_MS), bob: step % 2 ? -2 : 0 }
+}
+
+/** elapsed = 距换班开始的毫秒。返回两只猫此刻各自的姿态与位置；出画面的那只为 null。 */
+export function handoverFrame(elapsed: number): HandoverFrame {
+  const { LOOK_MS, WALK_MS, OVERLAP_MS, HOME_X, EXIT_PX, ENTER_X, SCENE_W } = HANDOVER
+  if (elapsed >= HANDOVER_MS) return { out: null, in: { pose: 'idle', x: HOME_X, bob: 0 }, done: true }
+  let out: Walker | null = null
+  if (elapsed < LOOK_MS) out = { pose: 'look', x: HOME_X, bob: 0 }
+  else if (elapsed < LOOK_MS + WALK_MS) {
+    out = stepping(elapsed - LOOK_MS, HOME_X, EXIT_PX)
+    if (out.x >= SCENE_W) out = null
+  }
+  let inn: Walker | null = null
+  const q = elapsed - (LOOK_MS + WALK_MS - OVERLAP_MS)
+  if (q >= WALK_MS) inn = { pose: 'ear', x: HOME_X, bob: 0 }
+  else if (q >= 0) inn = stepping(q, ENTER_X, HOME_X - ENTER_X)
+  return { out, in: inn, done: false }
 }
 
 /** 夜间：22:00–05:00。只看本机小时，连日记层都不用（简报 §4「夜猫子」）。 */

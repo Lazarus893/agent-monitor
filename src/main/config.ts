@@ -23,6 +23,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { clampPanelX } from '../shared/scale.js'
+import type { MidiSkinPref } from '../shared/types.js'
 
 export { canvasWidthFor, clampPanelX } from '../shared/scale.js'
 
@@ -56,6 +57,8 @@ export type Config = {
   openAtLogin?: boolean
   /** 托盘「打字时切到 Midi」。默认开。 */
   typingFollow?: boolean
+  /** 托盘「Midi 形象」。只认三个已知值，别的一律按默认。 */
+  midiSkin?: MidiSkinPref
   /**
    * 这个值是不是**用户自己调出来的**。
    *
@@ -112,6 +115,7 @@ export function readConfig(file = configFile()): Config {
     if (typeof o['alwaysOnTop'] === 'boolean') out.alwaysOnTop = o['alwaysOnTop']
     if (typeof o['openAtLogin'] === 'boolean') out.openAtLogin = o['openAtLogin']
     if (typeof o['typingFollow'] === 'boolean') out.typingFollow = o['typingFollow']
+    if (o['midiSkin'] === 'tabby' || o['midiSkin'] === 'siamese' || o['midiSkin'] === 'shift') out.midiSkin = o['midiSkin']
     return out
   } catch {
     // 不存在 / 坏 JSON / 没权限 —— 三种都回落默认，配置不该是启动的必要条件
@@ -202,9 +206,13 @@ export type Prefs = {
   openAtLogin: boolean
   /** 打字时把 F 页推到眼前（M5）。默认开 —— 猫的意义就是在你打字的时候陪着。 */
   typingFollow: boolean
+  /** 谁当班：Midi（虎斑）/ 咖啡（暹罗）/ 轮班。默认轮班（2026-09-16 用户要的）。 */
+  midiSkin: MidiSkinPref
 }
 
-export const DEFAULT_PREFS: Prefs = { muted: false, alwaysOnTop: false, openAtLogin: true, typingFollow: true }
+export const DEFAULT_PREFS: Prefs = {
+  muted: false, alwaysOnTop: false, openAtLogin: true, typingFollow: true, midiSkin: 'shift'
+}
 
 export function readPrefs(file = configFile()): Prefs {
   const cfg = readConfig(file)
@@ -212,7 +220,8 @@ export function readPrefs(file = configFile()): Prefs {
     muted: cfg.muted ?? DEFAULT_PREFS.muted,
     alwaysOnTop: cfg.alwaysOnTop ?? DEFAULT_PREFS.alwaysOnTop,
     openAtLogin: cfg.openAtLogin ?? DEFAULT_PREFS.openAtLogin,
-    typingFollow: cfg.typingFollow ?? DEFAULT_PREFS.typingFollow
+    typingFollow: cfg.typingFollow ?? DEFAULT_PREFS.typingFollow,
+    midiSkin: cfg.midiSkin ?? DEFAULT_PREFS.midiSkin
   }
 }
 

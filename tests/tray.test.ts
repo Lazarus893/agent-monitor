@@ -20,6 +20,7 @@ const actions = (): TrayActions & { calls: string[] } => {
     setAlwaysOnTop: v => calls.push(`top:${v}`),
     setOpenAtLogin: v => calls.push(`login:${v}`),
     setTypingFollow: v => calls.push(`follow:${v}`),
+    setMidiSkin: v => calls.push(`skin:${v}`),
     home: () => calls.push('home'),
     connect: () => calls.push('connect'),
     install: t => calls.push(`install:${t}`),
@@ -53,6 +54,7 @@ describe('菜单顺序', () => {
       '总在最前',
       '登录时启动',
       '打字时切到 Midi',
+      'Midi 形象',
       '回到总览页',
       '—',
       '连接 ZCode…',
@@ -88,7 +90,7 @@ describe('四个勾选项', () => {
   })
 
   it('勾选状态跟着 prefs 走', () => {
-    const s = state({ prefs: { muted: true, alwaysOnTop: true, openAtLogin: false, typingFollow: false } })
+    const s = state({ prefs: { ...DEFAULT_PREFS, muted: true, alwaysOnTop: true, openAtLogin: false, typingFollow: false } })
     expect(boxes(s).map(i => i.checked)).toEqual([true, true, false, false])
   })
 
@@ -108,7 +110,7 @@ describe('ZCode 与 Claude 采集', () => {
 
   it('采集那一行随装没装变文案', () => {
     const label = (c: TrayState['claude']): string =>
-      String(trayTemplate(state({ claude: c }), actions())[9]!.label)
+      String(trayTemplate(state({ claude: c }), actions())[10]!.label)
     expect(label({ statusline: false, hooks: false })).toBe('Claude 采集：未接入')
     expect(label({ statusline: true, hooks: false })).toBe('Claude 采集：仅额度')
     expect(label({ statusline: false, hooks: true })).toBe('Claude 采集：仅事件')
@@ -117,7 +119,7 @@ describe('ZCode 与 Claude 采集', () => {
 
   it('子菜单三项：装过的显示「重装」，一个都没装时「全部卸载」灰掉', () => {
     const sub = (c: TrayState['claude']) =>
-      trayTemplate(state({ claude: c }), actions())[9]!.submenu as Electron.MenuItemConstructorOptions[]
+      trayTemplate(state({ claude: c }), actions())[10]!.submenu as Electron.MenuItemConstructorOptions[]
     const none = sub({ statusline: false, hooks: false })
     expect(none.map(i => (i.type === 'separator' ? '—' : String(i.label))))
       .toEqual(['安装 statusline 采集', '安装 hooks', '—', '全部卸载'])
@@ -132,7 +134,7 @@ describe('ZCode 与 Claude 采集', () => {
 
   it('脚本没随包出来 / 正在装 → 三项都灰掉，点不动', () => {
     for (const over of [{ canInstall: false }, { busy: true }]) {
-      const sub = trayTemplate(state({ claude: { statusline: true, hooks: true }, ...over }), actions())[9]!
+      const sub = trayTemplate(state({ claude: { statusline: true, hooks: true }, ...over }), actions())[10]!
         .submenu as Electron.MenuItemConstructorOptions[]
       expect(sub.filter(i => i.type !== 'separator').map(i => i.enabled)).toEqual([false, false, false])
     }
@@ -140,10 +142,34 @@ describe('ZCode 与 Claude 采集', () => {
 
   it('三项各自触发对应的任务', () => {
     const a = actions()
-    const sub = trayTemplate(state({ claude: { statusline: true, hooks: true } }), a)[9]!
+    const sub = trayTemplate(state({ claude: { statusline: true, hooks: true } }), a)[10]!
       .submenu as Electron.MenuItemConstructorOptions[]
     for (const it of sub) it.click?.({} as never, undefined as never, undefined as never)
     expect(a.calls).toEqual(['install:statusline', 'install:hooks', 'install:uninstall-all'])
+  })
+})
+
+describe('Midi 形象', () => {
+  const sub = (s: TrayState, a = actions()) =>
+    trayTemplate(s, a).find(i => i.label === 'Midi 形象')!.submenu as Electron.MenuItemConstructorOptions[]
+
+  it('两只猫加轮班，互斥单选，默认轮班', () => {
+    expect(sub(state()).map(i => [i.label, i.type, i.checked])).toEqual([
+      ['Midi · 虎斑', 'radio', false], ['咖啡 · 暹罗', 'radio', false], ['轮班 · Midi 8–20 点，咖啡 其余时间', 'radio', true]
+    ])
+  })
+
+  it('勾选跟着 prefs.midiSkin 走', () => {
+    expect(sub(state({ prefs: { ...DEFAULT_PREFS, midiSkin: 'tabby' } })).map(i => i.checked)).toEqual([true, false, false])
+    expect(sub(state({ prefs: { ...DEFAULT_PREFS, midiSkin: 'siamese' } })).map(i => i.checked)).toEqual([false, true, false])
+  })
+
+  it('点一项把形象 id 交出去', () => {
+    const a = actions()
+    const items = sub(state(), a)
+    items[0]!.click?.({} as never, undefined as never, undefined as never)
+    items[2]!.click?.({} as never, undefined as never, undefined as never)
+    expect(a.calls).toEqual(['skin:tabby', 'skin:shift'])
   })
 })
 

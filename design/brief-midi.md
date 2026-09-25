@@ -1,6 +1,7 @@
 # Midi 打字伴侣 · F 页 · M0 简报
 
-> 交互原型（像素帧、状态机、灯的手感）：`design/midi-prototype.html`，浏览器直接打开。
+> 两只猫轮班：Midi（虎斑）白班 8–20 点，咖啡（暹罗）其余时间；托盘「Midi 形象」可固定一只；F 页场景下方「换班」按钮临时换；换班有走位动画。实现与截图见 `design/midi-cat-v3/IMPLEMENTATION.md`（暹罗）与 `design/midi-cat-v2/IMPLEMENTATION.md`（虎斑）。
+> `design/midi-prototype.html` 仅保留为历史交互原型。
 > 玩法与取舍的完整版发布在 Artifact「墨墨打字伴侣」（猫已改名 Midi）。本文只写 M0 要做的事。
 
 ## 0 · 一句话
@@ -40,8 +41,8 @@
 ## 4 · 渲染层 F 页
 
 - 画布区分左右：左边场景（`<canvas>`，像素倍率 4，整数倍）、右边三个数 + 一行状态文案；底部指示点自动多一个。
-- 帧：idle / typeL / typeR / look / blink / night / sleep，16×14 格，5 色，全部来自原型。灯、键盘同原型。
-- 状态机（纯函数，可测）：`< 600 ms` 打字（每个脉冲切一次爪）；`< 4 s` idle（3–7 s 随机眨眼）；`< 5 min` 抬头看你；`≥ 5 min` 睡。22:00–05:00 眼睛眯成一条缝（night 帧替代 idle/look）。
+- 帧：idle / typeL / typeR / look / blink / night / sleep，另有 idle 的 ear 姿态；图集按形象取 `src/renderer/assets/midi-{siamese,tabby}.png`，各渲染到固定 96×96 缓存；偏好 `midiSkin`（tabby / siamese / shift）经 command 推到渲染层，`shared/midi-cats.ts` 决定此刻谁当班；文案里的名字跟当班的猫走。换班编排是 `midi.ts` 的纯函数 `handoverFrame`。灯、键盘仍为主题色字符网格。
+- 状态机（纯函数，可测）：`< 600 ms` 打字（每个脉冲切一次爪）；`< 4 s` idle（3–7 s 随机眨眼，闭眼 220 ms）；`< 5 min` 抬头看你；`≥ 5 min` 睡。22:00–05:00 眼睛眯成一条缝（night 帧替代 idle/look）。
 - 心流灯：`flow ∈ [0,1]`，每个字 +0.03，停 2 s 后每秒 −0.03，底 0.06 不灭到零；灯光透明度与影子长度（0–3 格）跟它走。
 - 里程碑：今日字数每过 500 跳一下（2 格上 2 格下，480 ms，切帧不补间）。
 - 位移一律落网格；只有透明度允许平滑。`prefers-reduced-motion` 时不跳、不点头，只切帧。

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Midi 方案 1 · 副屏尺寸预览</title>
+<link rel="stylesheet" href="../tokens.css"><link rel="stylesheet" href="../../src/renderer/app.css">
+<style>
+@font-face{font-family:Inter;src:url('../../node_modules/@fontsource/inter/files/inter-latin-400-normal.woff2')}@font-face{font-family:'IBM Plex Mono';src:url('../../node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-500-normal.woff2');font-weight:500}
+body{display:block;height:auto;overflow:auto;background:#17191b;font-family:system-ui;color:#cdcdcd;padding:24px}
+.controls{max-width:960px;margin:0 auto 20px}h1{font-size:20px;color:#f4f4f6;margin:0 0 10px}p{font-size:13px;line-height:1.7;margin:8px 0}
+button{font:inherit;background:#242728;color:#cdcdcd;border:1px solid #434345;border-radius:6px;padding:8px 12px;cursor:pointer;margin:4px 6px 4px 0}
+button[aria-pressed=true]{background:#e4e4df;color:#17191b}
+.viewport{position:relative;width:960px;height:540px;margin:0 auto;background:var(--canvas);overflow:hidden}
+.stage{position:absolute;left:0;top:0;width:403px;height:270px;transform-origin:0 0;transform:scale(2.38,2)}
+.viewport.physical{width:806px}.physical .stage{transform:scale(2)}
+.f-scene{position:relative}.f-scene canvas{position:absolute;inset:0}.cat{position:absolute;object-fit:contain;image-rendering:pixelated}
+.safe-box{position:absolute;left:72px;top:0;width:120px;height:112px;border:1px dashed #6a6b6c;display:none}
+.guides .safe-box{display:block}.meta{max-width:960px;margin:18px auto 0;font-size:13px;line-height:1.8}
+.capture body{padding:0;background:var(--canvas)}.capture .controls,.capture .meta{display:none}.capture .viewport{margin:0}
+</style></head><body>
+<div class="controls"><h1>方案 1 · 放进副屏看尺寸</h1>
+<p>复用项目 F 页样式：403×270 排版画布 / 左场景 224×128 / 右统计 151。示例数字仅用于排版。猫是小尺寸简化稿，尚未接入正式应用。</p>
+<div><button data-size="old" aria-pressed="false">现有猫 · 64×56</button><button data-size="96" aria-pressed="true">推荐 · 96×96</button><button data-size="112" aria-pressed="false">更大 · 112×112</button></div>
+<div><button id="physical" aria-pressed="true">物理比例示意</button><button id="guides" aria-pressed="false">显示动作边界</button></div>
+<p id="mode-note">按副屏补偿后比例示意（806×540）；在普通显示器上看猫不会被横向拉宽。切换可看 960×540 输出缓冲区。</p></div>
+<div class="viewport physical" id="viewport"><div class="stage"><div class="screen">
+<div class="topbar"><span class="tb-right"><span class="clock">14:32</span></span></div>
+<div class="pages"><section class="page page-f" data-on="1"><div class="fwrap">
+<div class="f-scene" id="scene"><canvas id="scene-canvas" width="224" height="128"></canvas><img class="cat" id="cat" src="04-round-small.png" alt="方案 1 圆脸银虎斑"><div class="safe-box"></div></div>
+<div class="f-side"><div class="f-stats"><div class="f-today"><div class="f-label">今日</div><div class="f-num"><b class="num">2864</b><span class="f-unit">字</span></div></div><div class="f-row"><span>昨天</span><b>3192 字</b></div><div class="f-row"><span>连续</span><b>12 天</b></div></div><p class="f-state">Midi 在等你</p></div>
+</div></section><div class="dots"><button aria-label="第 1 页" data-on="0"></button><button aria-label="第 2 页" data-on="0"></button><button aria-label="第 3 页" data-on="0"></button><button aria-label="第 4 页" data-on="0"></button><button aria-label="第 5 页" data-on="0"></button><button aria-label="第 6 页" data-on="0"></button><button aria-label="第 7 页" data-on="1"></button></div></div>
+</div></div></div>
+<div class="meta"><strong id="size-note"></strong><br>推荐动作范围：x=72–192，y=0–112；96×96 猫框放在 (80,8)，向上跳 8px 仍在画布内。右栏起点 x=236，猫和动作均留在左侧 224px 场景中。<br>这里是布局验证，不是动画成品。生成稿尚需统一像素网格，正式帧建议 48×48 源网格 × 2；头脸、爪子、尾巴分别制作动作。</div>
+
+<script>
+window.setSize=function(size){
+ const cat=document.getElementById('cat'),ctx=document.getElementById('scene-canvas').getContext('2d');
+ ctx.clearRect(0,0,224,128);
+ const old=size==='old', desk=old?92:104;
+ const pal={...window.spriteData?.CAT_PAL,z:'#9c9c9d',L:'#f4f4f6',k:'#242728',K:'#07080a'};
+ function draw(grid,x,y,p=4){if(!grid)return;grid.forEach((row,r)=>[...row].forEach((ch,c)=>{if(pal[ch]){ctx.fillStyle=pal[ch];ctx.fillRect(x+c*p,y+r*p,p,p)}}))}
+ ctx.fillStyle='#242728';ctx.fillRect(0,desk,224,2);ctx.fillStyle='#0d0d0d';ctx.fillRect(0,desk+2,224,128-desk-2);
+ draw(window.spriteData?.LAMP,12,desk-56);
+ draw(window.spriteData?.KEYBOARD,old?84:80,old?78:100);
+ cat.hidden=old;
+ if(old){draw(window.spriteData?.CAT.idle,96,40);draw(window.spriteData?.KEYBOARD,84,78);draw(window.spriteData?.CAT.idle.slice(11),96,84);}
+ else {const s=Number(size);Object.assign(cat.style,{width:s+'px',height:s+'px',left:(128-s/2)+'px',top:(104-s)+'px'})}
+ document.querySelectorAll('[data-size]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.size===size)));
+ document.getElementById('size-note').textContent=old?'现有：16×14 源网格 × 4；猫框 64×56。':size==='96'?'推荐：猫框 96×96，坐姿清楚，顶部可留 8px 小跳空间。':'112×112：顶部到 -8px，会裁到耳朵区域，缺少小跳空间；需要进一步下移桌面或增高场景。';
+ window.currentSize=size;
+};
+document.querySelectorAll('[data-size]').forEach(b=>b.onclick=()=>setSize(b.dataset.size));
+document.getElementById('physical').onclick=function(){const on=document.getElementById('viewport').classList.toggle('physical');this.setAttribute('aria-pressed',String(on));document.getElementById('mode-note').textContent=on?'按副屏补偿后比例示意（806×540）；在普通显示器上看猫不会被横向拉宽。':'960×540 输出缓冲区，包含 1.19 横向预拉伸；实际面板压缩后才恢复正确比例。'};
+document.getElementById('guides').onclick=function(){const on=document.getElementById('scene').classList.toggle('guides');this.setAttribute('aria-pressed',String(on))};
+const params=new URLSearchParams(location.search);if(params.has('capture'))document.documentElement.classList.add('capture');
+if(params.get('mode')==='buffer')document.getElementById('viewport').classList.remove('physical');
+</script><script src="sizing-sprites.js"></script></body></html>

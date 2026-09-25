@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { flowStep, frameFor, isNight, milestoneHop, stateText } from '../src/renderer/midi.js'
+import { flowStep, frameFor, HANDOVER, HANDOVER_MS, handoverFrame, isNight, milestoneHop, stateText } from '../src/renderer/midi.js'
+import { catName, nextShiftAt, otherCat, resolveSkin, shiftSkinAt } from '../src/shared/midi-cats.js'
 import type { FrameInput } from '../src/renderer/midi.js'
-import { CAT, CAT_PAL, KEYBOARD, LAMP } from '../src/renderer/midi-sprites.js'
-import type { Frame, FrameName } from '../src/renderer/midi-sprites.js'
+import { CAT_ATLAS_FILE, CAT_ATLAS_SIZE, CAT_SIZE, CAT_PAW_Y, CAT_SKINS, KEYBOARD, LAMP } from '../src/renderer/midi-sprites.js'
+import type { MidiSkin } from '../src/shared/types.js'
 
 const T0 = 1_000_000
 
@@ -48,6 +49,8 @@ describe('帧：四态 + 夜间 + 诚实态', () => {
   it('这一程还没收到过脉冲：idle（夜里是 night），不是睡着了', () => {
     expect(frame({ lastInputAt: 0 })).toBe('idle')
     expect(frame({ lastInputAt: 0, night: true })).toBe('night')
+    expect(frame({ lastInputAt: 0, blinkUntil: T0 + 200 })).toBe('blink')
+    expect(frame({ lastInputAt: 0, blinkUntil: T0, night: true })).toBe('night')
   })
 })
 
@@ -86,7 +89,14 @@ describe('心流灯', () => {
 
 describe('文案', () => {
   const text = (o: Partial<Parameters<typeof stateText>[0]> = {}): string =>
-    stateText({ now: T0, lastInputAt: T0, night: false, status: 'ok', ...o })
+    stateText({ now: T0, lastInputAt: T0, night: false, status: 'ok', name: 'Midi', ...o })
+
+  it('文案里的名字跟当班的猫走', () => {
+    expect(text({ name: '咖啡', lastInputAt: 0 })).toBe('咖啡 在等你')
+    expect(text({ name: '咖啡', status: 'offline' })).toBe('还没连上 咖啡 的耳朵')
+    expect(text({ name: catName('siamese'), lastInputAt: T0 - 300_000 })).toBe('咖啡 睡着了')
+    expect(text({ name: catName('tabby'), lastInputAt: T0 - 300_000 })).toBe('Midi 睡着了')
+  })
 
   it('三种诚实态与简报 §4 一字不差', () => {
     expect(text({ status: 'connecting' })).toBe('Midi 正在醒来')
@@ -117,6 +127,50 @@ describe('文案', () => {
   })
 })
 
+describe('轮班', () => {
+  it('Midi 白班 08–20，咖啡其余时间；指定一只时不看钟', () => {
+    expect(shiftSkinAt(8)).toBe('tabby'); expect(shiftSkinAt(19)).toBe('tabby')
+    expect(shiftSkinAt(20)).toBe('siamese'); expect(shiftSkinAt(7)).toBe('siamese'); expect(shiftSkinAt(0)).toBe('siamese')
+    expect(resolveSkin('shift', 12)).toBe('tabby'); expect(resolveSkin('shift', 23)).toBe('siamese')
+    expect(resolveSkin('siamese', 12)).toBe('siamese'); expect(resolveSkin('tabby', 23)).toBe('tabby')
+  })
+
+  it('下一个交班点：08:00 / 20:00 取最近的；「换班」按钮在轮班模式下顶到这里为止', () => {
+    const at = (h: number, m = 0): number => new Date(2026, 8, 16, h, m).getTime()
+    expect(nextShiftAt(at(3))).toBe(at(8))
+    expect(nextShiftAt(at(8))).toBe(at(20))
+    expect(nextShiftAt(at(19, 59))).toBe(at(20))
+    expect(nextShiftAt(at(20))).toBe(new Date(2026, 8, 17, 8).getTime())
+    expect(otherCat('tabby')).toBe('siamese'); expect(otherCat('siamese')).toBe('tabby')
+  })
+
+  it('换班编排：先抬头，再走出去，接班的从左边走进来，坐定动耳朵，到点收尾', () => {
+    const { LOOK_MS, WALK_MS, OVERLAP_MS, HOME_X, ENTER_X, SCENE_W, GRID } = HANDOVER
+    expect(handoverFrame(0)).toEqual({ out: { pose: 'look', x: HOME_X, bob: 0 }, in: null, done: false })
+    const mid = handoverFrame(LOOK_MS + WALK_MS / 2)
+    expect(mid.out!.x).toBeGreaterThan(HOME_X); expect(mid.out!.x % GRID).toBe(0)
+    expect(['typeL', 'typeR']).toContain(mid.out!.pose)
+    expect(mid.in).toBeNull()
+    // 接班的比前一段早 OVERLAP_MS 起步，从画面左侧外面进来
+    const enter = handoverFrame(LOOK_MS + WALK_MS - OVERLAP_MS)
+    expect(enter.in).toEqual({ pose: 'typeR', x: ENTER_X, bob: 0 })
+    // 出去的那只走到画面外就不画了
+    const gone = handoverFrame(LOOK_MS + WALK_MS - 1)
+    expect(gone.out === null || gone.out.x >= SCENE_W - GRID).toBe(true)
+    // 坐定：回到猫框原位，动耳朵
+    const settle = handoverFrame(HANDOVER_MS - 1)
+    expect(settle.in).toEqual({ pose: 'ear', x: HOME_X, bob: 0 }); expect(settle.done).toBe(false)
+    expect(handoverFrame(HANDOVER_MS)).toEqual({ out: null, in: { pose: 'idle', x: HOME_X, bob: 0 }, done: true })
+  })
+
+  it('走位全程落在 4px 网格上，起伏只有 0 / −2', () => {
+    for (let t = 0; t < HANDOVER_MS; t += 16) {
+      const f = handoverFrame(t)
+      for (const w of [f.out, f.in]) if (w) { expect(Math.abs(w.x % HANDOVER.GRID)).toBe(0); expect([0, -2]).toContain(w.bob) }
+    }
+  })
+})
+
 describe('夜间与里程碑', () => {
   it('22:00–05:00 算夜里', () => {
     expect([22, 23, 0, 3, 4].map(isNight)).toEqual([true, true, true, true, true])
@@ -135,24 +189,42 @@ describe('夜间与里程碑', () => {
   })
 })
 
-describe('像素资产', () => {
-  it('七帧都在，每帧 16×14 格', () => {
-    const names = ['idle', 'typeL', 'typeR', 'look', 'blink', 'night', 'sleep'] as const
-    expect(Object.keys(CAT).sort()).toEqual([...names].sort())
-    for (const n of names) {
-      expect(CAT[n]).toHaveLength(14)
-      for (const row of CAT[n]) expect(row).toHaveLength(16)
+const SKINS = Object.keys(CAT_SKINS) as MidiSkin[]
+
+describe('两套动作图', () => {
+  it('两套形象各有一张图集文件，姿态集合相同', () => {
+    expect(SKINS).toEqual(['tabby', 'siamese'])
+    expect(Object.keys(CAT_ATLAS_FILE)).toEqual(SKINS)
+    for (const skin of SKINS) expect(Object.keys(CAT_SKINS[skin])).toEqual(Object.keys(CAT_SKINS.tabby))
+  })
+  it.each(SKINS)('%s：图集尺寸与源矩形一致，裁切不会读到相邻动作', skin => {
+    const png = readFileSync(join(process.cwd(), 'src/renderer/assets', CAT_ATLAS_FILE[skin]))
+    expect(png.subarray(1, 4).toString()).toBe('PNG')
+    expect(png.readUInt32BE(16)).toBe(CAT_ATLAS_SIZE.width)
+    expect(png.readUInt32BE(20)).toBe(CAT_ATLAS_SIZE.height)
+    expect(png[25]).toBe(6) // RGBA，避免黑底/品红底被打包
+    for (const { source: [x, y, w, h] } of Object.values(CAT_SKINS[skin])) {
+      expect(w).toBeGreaterThan(0); expect(h).toBeGreaterThan(0)
+      expect(x + w).toBeLessThanOrEqual(CAT_ATLAS_SIZE.width)
+      expect(y + h).toBeLessThanOrEqual(CAT_ATLAS_SIZE.height)
+      expect(Math.floor(x / 384)).toBe(Math.floor((x + w - 1) / 384))
+      expect(Math.floor(y / 512)).toBe(Math.floor((y + h - 1) / 512))
     }
   })
-
-  it('猫只有 5 色，帧里不出现别的字符', () => {
-    expect(Object.keys(CAT_PAL).sort()).toEqual(['d', 'e', 'h', 'o', 'p'])
-    const used = new Set(Object.values(CAT).flat().join('').split(''))
-    used.delete('.')
-    expect([...used].sort()).toEqual(['d', 'e', 'h', 'o', 'p'])
+  it.each(SKINS)('%s：七个状态都有帧；站姿、睡姿脚底固定，小跳不会超出场景', skin => {
+    const CAT = CAT_SKINS[skin]
+    for (const name of ['idle', 'typeL', 'typeR', 'look', 'blink', 'night', 'sleep'] as const) {
+      const [x, y, w, h] = CAT[name].target
+      expect(x).toBeGreaterThanOrEqual(0); expect(y).toBeGreaterThanOrEqual(0)
+      expect(x + w).toBeLessThanOrEqual(CAT_SIZE)
+      expect(y + h).toBe(92)
+      expect(8 + y - 8).toBeGreaterThanOrEqual(0)
+      expect(8 + y + h).toBeLessThanOrEqual(128)
+    }
+    expect(CAT_PAW_Y).toBeLessThan(92)
+    expect(CAT.typeL.source).not.toEqual(CAT.typeR.source)
   })
-
-  it('灯 8×14、键盘 20×4，字符只用场景那四个（色值由 tokens 给）', () => {
+  it('灯与键盘仍使用主题的四个字符', () => {
     expect(LAMP).toHaveLength(14)
     for (const row of LAMP) expect(row).toHaveLength(8)
     expect(KEYBOARD).toHaveLength(4)
@@ -160,73 +232,5 @@ describe('像素资产', () => {
     const used = new Set((LAMP.join('') + KEYBOARD.join('')).split(''))
     used.delete('.')
     expect([...used].sort()).toEqual(['K', 'L', 'k', 'z'])
-  })
-})
-
-/**
- * 像素资产的移植是忠实的（与 tests/stage-css-port.test.ts 同一条思路）。
- *
- * design/midi-prototype.html 是这批帧唯一的设计真源 —— designer 是在像素网格上
- * 直接画的，没有 PNG 素材。midi-sprites.ts 是它的副本，而两份文件迟早会分家：
- * 原型改了一只耳朵而这边没跟，屏上就悄悄落后一版，且没有任何断言会红
- * （帧仍然 16×14、仍然只有 5 色，只是不是最新那一只猫）。
- * 这条把「副本是逐字的」变成可执行的判据。
- *
- * 只比猫的 5 色：场景那四个字符（k / K / L / z）在原型里自带一套灰，
- * 在 sprites 里**故意不给色值** —— 桌子和灯要跟着整屏的 tokens 走（见 sprites 的头注释）。
- */
-const PROTOTYPE = join(process.cwd(), 'design', 'midi-prototype.html')
-
-/** 原型里的 `F(\`…\`)` 块，按名字取。与 sprites 里的 F 同一个变换。 */
-function prototypeFrames(): Record<string, Frame> {
-  const html = readFileSync(PROTOTYPE, 'utf8')
-  const out: Record<string, Frame> = {}
-  // `idle: F(`…`)` 与 `const LAMP = F(`…`)` 两种写法都吃；名字取 : 或 = 前面那个标识符
-  for (const m of html.matchAll(/(\w+)\s*[:=]\s*F\(`([^`]*)`\)/g)) {
-    const [, name, body] = m
-    // 同名出现两次 = 原型里有两份，「逐字相同」就没了意义
-    expect(out[name!], `原型里 ${name!} 出现了不止一次`).toBeUndefined()
-    out[name!] = body!.trim().split('\n').map(l => l.trim())
-  }
-  return out
-}
-
-/** 原型的 PAL 对象。整块取出来再逐条解析，免得撞上别处的 `x:'#hex'`。 */
-function prototypePal(): Record<string, string> {
-  const html = readFileSync(PROTOTYPE, 'utf8')
-  const block = /const PAL\s*=\s*\{([\s\S]*?)\n\s*\};/.exec(html)
-  expect(block, '原型里找不到 PAL 对象（它改名了？）').not.toBeNull()
-  const out: Record<string, string> = {}
-  for (const m of block![1]!.matchAll(/(\w+)\s*:\s*'(#[0-9a-fA-F]{3,8})'/g)) out[m[1]!] = m[2]!
-  return out
-}
-
-describe('像素资产与原型逐字相同', () => {
-  it('猫的七帧与原型一字不差', () => {
-    const proto = prototypeFrames()
-    const names: FrameName[] = ['idle', 'typeL', 'typeR', 'look', 'blink', 'night', 'sleep']
-    for (const n of names) {
-      expect(proto[n], `原型里没有 ${n} 这一帧`).toBeDefined()
-      expect(CAT[n], n).toEqual(proto[n])
-    }
-  })
-
-  it('灯与键盘与原型一字不差', () => {
-    const proto = prototypeFrames()
-    expect(LAMP).toEqual(proto['LAMP'])
-    expect(KEYBOARD).toEqual(proto['KEYBOARD'])
-  })
-
-  it('猫的 5 色与原型的 PAL 一致；场景那四个字符不在这里给色值', () => {
-    const pal = prototypePal()
-    for (const ch of ['o', 'd', 'h', 'e', 'p']) {
-      expect(CAT_PAL[ch], ch).toBe(pal[ch])
-    }
-    expect(Object.keys(CAT_PAL).sort()).toEqual(['d', 'e', 'h', 'o', 'p'])
-    // k / K / L / z 由渲染层从 tokens 取（app.ts 的 midiPalette），不从原型搬灰度
-    for (const ch of ['k', 'K', 'L', 'z']) {
-      expect(pal[ch], `原型的 PAL 少了场景色 ${ch}`).toBeDefined()
-      expect(CAT_PAL[ch], ch).toBeUndefined()
-    }
   })
 })
